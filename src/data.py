@@ -38,6 +38,12 @@ __all__ = [
     "load_recording",
     "load_events",
     "load_seizure_annotations",
+    "read_annotation_sheet",
+    "annotation_issues",
+    "excel_time_to_seconds",
+    "format_clock",
+    "file_id",
+    "match_recording_id",
     "summarize",
     "channel_quality",
     "saturation_report",
@@ -483,67 +489,225 @@ def load_recording(
 
 
 # ---------------------------------------------------------------------------
-# Annotations cliniques (fichier Excel) - utilisees a partir de la Partie II
+# Annotations cliniques (fichier Excel) - Partie II
 # ---------------------------------------------------------------------------
-def load_seizure_annotations(
-    root: Path | str | None = None,
-    filename: str = "Crises absences.xlsx",
-) -> pd.DataFrame:
-    """Met les annotations de crises au format long (une ligne = une crise).
+ANNOTATIONS_FILE = "Annotations_MAJ.xlsx"
+SECONDS_PER_DAY = 86400.0
 
-    Le fichier Excel range les crises en colonnes (`DebCE1`, `FinCE1`, ...) et
-    les instants sont des fractions de journee. On les convertit en secondes
-    depuis minuit.
+# Corrections appliquees au fichier source, chacune justifiee. Une crise
+# d'absence dure quelques secondes ; une valeur qui donne plusieurs heures est
+# une faute de saisie. L'ancien fichier "Crises absences.xlsx" donne la bonne
+# valeur pour la meme case.
+ANNOTATION_CORRECTIONS = [
+    {
+        "recording_id": "210504B-C",
+        "column": "FinCE1",
+        "wrong": 0.785486111111111,
+        "fixed": 0.535486111111111,
+        "reason": "FinCE1 = 0,785486 donne une crise de 6 h ; l'ancien fichier "
+        "donne 0,535486, soit une crise de 8 s (chiffre 7 tape a la place de 5).",
+    },
+]
+
+
+def excel_time_to_seconds(value: float) -> float:
+    """Fraction de journee Excel -> secondes depuis minuit (arrondi a 10 ms)."""
+    return round(float(value) * SECONDS_PER_DAY, 2)
+
+
+def format_clock(seconds: float) -> str:
+    """Secondes depuis minuit -> "HH:MM:SS"."""
+    seconds = int(round(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def read_annotation_sheet(
+    root: Path | str | None = None,
+    filename: str = ANNOTATIONS_FILE,
+) -> pd.DataFrame:
+    """Lit la feuille Excel telle quelle (une ligne = un enregistrement).
+
+    Le fichier contient des formules de total jusqu'a la ligne 1 048 572 :
+    on ne lit que les premieres lignes, sinon pandas charge un million de
+    lignes vides.
     """
     path = raw_dir(root) / filename
-    table = pd.read_excel(path)
+    table = pd.read_excel(path, nrows=200)
 
     table = table.rename(columns={table.columns[0]: "recording_id"})
     table.columns = [str(column).strip() for column in table.columns]
 
     # Deux colonnes sont mal orthographiees dans le fichier source.
     table = table.rename(columns={"DebutCE5": "DebCE5", "DebtCE11": "DebCE11"})
-    table = table.dropna(how="all")
     table = table[table["recording_id"].notna()].copy()
+    table["recording_id"] = table["recording_id"].astype(str).str.strip().str.upper()
+    table["excel_row"] = table.index + 2  # numero de ligne dans Excel
 
-    numbers = sorted(
+    return table.reset_index(drop=True)
+
+
+def _seizure_numbers(table: pd.DataFrame) -> list[int]:
+    return sorted(
         int(column[len("DebCE") :])
         for column in table.columns
         if column.startswith("DebCE") and column[len("DebCE") :].isdigit()
     )
 
+
+def load_seizure_annotations(
+    root: Path | str | None = None,
+    filename: str = ANNOTATIONS_FILE,
+    apply_corrections: bool = True,
+) -> pd.DataFrame:
+    """Met les annotations de crises au format long (une ligne = une crise).
+
+    Regle donnee par l'encadrante (mail du 1er octobre) : les valeurs `DebCE` /
+    `FinCE` sont des heures de la journee, et la nouvelle colonne `DebutTrace`
+    donne l'heure de debut du trace. Donc :
+
+        debut (s depuis le debut du trace) = DebCEk - DebutTrace
+        duree (s)                           = FinCEk - DebCEk
+
+    Les enregistrements presents deux fois sont gardes a leur premiere
+    occurrence (voir `annotation_issues`).
+    """
+    table = read_annotation_sheet(root, filename)
+
+    if "DebutTrace" not in table.columns:
+        raise ValueError(
+            f"{filename} n'a pas de colonne DebutTrace : utilisez Annotations_MAJ.xlsx."
+        )
+
+    if apply_corrections:
+        for fix in ANNOTATION_CORRECTIONS:
+            mask = table["recording_id"] == fix["recording_id"]
+            close = np.isclose(table.loc[mask, fix["column"]], fix["wrong"])
+            table.loc[mask[mask].index[close], fix["column"]] = fix["fixed"]
+
+    table = table.drop_duplicates(subset="recording_id", keep="first")
+
     rows = []
     for _, record in table.iterrows():
-        for number in numbers:
+        trace_start = excel_time_to_seconds(record["DebutTrace"])
+
+        for number in _seizure_numbers(table):
             start = record.get(f"DebCE{number}")
             end = record.get(f"FinCE{number}")
 
             if pd.isna(start) or pd.isna(end):
                 continue
 
+            start_clock = excel_time_to_seconds(start)
+            end_clock = excel_time_to_seconds(end)
+
             rows.append(
                 {
-                    "recording_id": str(record["recording_id"]).strip(),
+                    "recording_id": record["recording_id"],
                     "seizure": number,
-                    "start_s": float(start) * 86400.0,
-                    "end_s": float(end) * 86400.0,
+                    "trace_start": format_clock(trace_start),
+                    "start_clock": format_clock(start_clock),
+                    "end_clock": format_clock(end_clock),
+                    "start_s": round(start_clock - trace_start, 2),
+                    "end_s": round(end_clock - trace_start, 2),
                     "reported_count": record.get("NombreCE", np.nan),
                 }
             )
 
-    seizures = pd.DataFrame(
-        rows,
-        columns=["recording_id", "seizure", "start_s", "end_s", "reported_count"],
-    )
-    seizures["duration_s"] = seizures["end_s"] - seizures["start_s"]
+    seizures = pd.DataFrame(rows)
+    seizures["duration_s"] = (seizures["end_s"] - seizures["start_s"]).round(2)
 
     return seizures
+
+
+def annotation_issues(
+    root: Path | str | None = None,
+    filename: str = ANNOTATIONS_FILE,
+    durations: dict[str, float] | None = None,
+) -> pd.DataFrame:
+    """Liste les incoherences du fichier d'annotations et la decision prise.
+
+    `durations` (facultatif) : duree de chaque enregistrement en secondes,
+    cle au format Excel ("230102B-F"), pour verifier que les crises tiennent
+    dans le trace.
+    """
+    table = read_annotation_sheet(root, filename)
+    issues = []
+
+    # 1. Enregistrements en double
+    for recording_id, group in table.groupby("recording_id"):
+        if len(group) < 2:
+            continue
+        columns = [c for c in table.columns if c.startswith(("DebCE", "FinCE"))]
+        first, other = group.iloc[0], group.iloc[1]
+        diff = (other[columns] - first[columns]).abs().astype(float) * SECONDS_PER_DAY
+        issues.append(
+            {
+                "enregistrement": recording_id,
+                "probleme": f"present 2 fois (lignes Excel {first['excel_row']} et "
+                f"{other['excel_row']}), ecart max {diff.max():.0f} s",
+                "decision": "premiere ligne gardee (identique a l'ancien fichier)",
+            }
+        )
+
+    # 2. Corrections de saisie
+    for fix in ANNOTATION_CORRECTIONS:
+        issues.append(
+            {
+                "enregistrement": fix["recording_id"],
+                "probleme": fix["reason"],
+                "decision": f"{fix['column']} corrige : {fix['wrong']:.6f} -> {fix['fixed']:.6f}",
+            }
+        )
+
+    # 3. Nombre de crises annoncees != nombre d'intervalles remplis
+    seizures = load_seizure_annotations(root, filename)
+    counts = seizures.groupby("recording_id").agg(
+        annonce=("reported_count", "first"), remplies=("seizure", "size")
+    )
+    for recording_id, row in counts.iterrows():
+        if int(row["annonce"]) != int(row["remplies"]):
+            issues.append(
+                {
+                    "enregistrement": recording_id,
+                    "probleme": f"NombreCE = {int(row['annonce'])} mais "
+                    f"{int(row['remplies'])} intervalles remplis",
+                    "decision": "les intervalles remplis font foi",
+                }
+            )
+
+    # 4. Intervalles impossibles
+    for _, crise in seizures.iterrows():
+        problems = []
+        if crise["duration_s"] <= 0:
+            problems.append("fin avant le debut")
+        if crise["start_s"] < 0:
+            problems.append("debut avant le debut du trace")
+        if durations and crise["recording_id"] in durations:
+            if crise["end_s"] > durations[crise["recording_id"]]:
+                problems.append("fin apres la fin du trace")
+        if problems:
+            issues.append(
+                {
+                    "enregistrement": crise["recording_id"],
+                    "probleme": f"crise {crise['seizure']} : " + ", ".join(problems),
+                    "decision": "a verifier",
+                }
+            )
+
+    return pd.DataFrame(issues, columns=["enregistrement", "probleme", "decision"])
 
 
 def match_recording_id(recording_id: str) -> str:
     """Convertit `230102B_F_0000` en `230102B-F` (forme utilisee dans l'Excel)."""
     base = recording_id.rsplit("_", 1)[0]
     return base.replace("_", "-").upper()
+
+
+def file_id(excel_id: str) -> str:
+    """Convertit `230102B-F` (Excel) en `230102B_F_0000` (nom de fichier)."""
+    return excel_id.strip().upper().replace("-", "_") + "_0000"
 
 
 # ---------------------------------------------------------------------------

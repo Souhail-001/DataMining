@@ -1,0 +1,1325 @@
+<meta charset="utf-8">
+<title>Station EEG Absences</title>
+<meta name="description" content="Exploration interactive des signaux EEG et des modèles de détection des crises d'absence">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout : poste de lecture EEG. Barre d'onglets en haut, chaque vue occupe toute la largeur,
+   tracé + panneau d'analyse a droite sur grand ecran, empiles sur telephone. */
+:root {
+  --paper: #f3f5f6;        /* fond, papier EEG legerement froid */
+  --panel: #ffffff;
+  --ink: #12181d;
+  --ink-2: #4b5660;
+  --ink-3: #7c8791;
+  --rule: #dde2e6;
+  --grid: #e7ebee;
+  --grid-strong: #cfd6dc;
+  --trace: #1d2b38;
+  --crisis: #e8622c;       /* crise annotee */
+  --crisis-soft: rgba(232, 98, 44, 0.16);
+  --calm: #7d93ab;         /* hors crise */
+  --accent: #1f6fd1;       /* selection, liens */
+  --accent-soft: rgba(31, 111, 209, 0.12);
+  --good: #12805c;
+  --warn: #b7791f;
+  --m1: #2a78d6; --m2: #1baf7a; --m3: #4a3aa7; --m4: #d18f00; --m5: #d0588a; --m6: #008300;
+  --seq-0: #fff1e6; --seq-1: #f9c49f; --seq-2: #f08a52; --seq-3: #d2501e; --seq-4: #8d2f0f;
+  --font-display: "Archivo", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0e1317; --panel: #151c22; --ink: #e8edf1; --ink-2: #a9b4bd; --ink-3: #75828d;
+    --rule: #26313a; --grid: #1b242b; --grid-strong: #2b3741; --trace: #cbd8e3;
+    --crisis: #f0743f; --crisis-soft: rgba(240, 116, 63, 0.2); --calm: #6f86a0;
+    --accent: #5b9cf0; --accent-soft: rgba(91, 156, 240, 0.16); --good: #3cc08f; --warn: #e0a640;
+    --m1: #3987e5; --m2: #22b585; --m3: #9085e9; --m4: #e0a100; --m5: #e66c9a; --m6: #2fa82f;
+    --seq-0: #2a1b14; --seq-1: #6b2e14; --seq-2: #b44a1c; --seq-3: #ef7a3f; --seq-4: #ffc9a3;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0e1317; --panel: #151c22; --ink: #e8edf1; --ink-2: #a9b4bd; --ink-3: #75828d;
+  --rule: #26313a; --grid: #1b242b; --grid-strong: #2b3741; --trace: #cbd8e3;
+  --crisis: #f0743f; --crisis-soft: rgba(240, 116, 63, 0.2); --calm: #6f86a0;
+  --accent: #5b9cf0; --accent-soft: rgba(91, 156, 240, 0.16); --good: #3cc08f; --warn: #e0a640;
+  --m1: #3987e5; --m2: #22b585; --m3: #9085e9; --m4: #e0a100; --m5: #e66c9a; --m6: #2fa82f;
+  --seq-0: #2a1b14; --seq-1: #6b2e14; --seq-2: #b44a1c; --seq-3: #ef7a3f; --seq-4: #ffc9a3;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { background: var(--paper); color: var(--ink); }
+body { font: 14px/1.5 var(--font-body); padding-inline: 16px; padding-block: 0 48px; }
+h1, h2, h3 { font-family: var(--font-display); font-stretch: 78%; letter-spacing: 0.005em; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(28px, 4.2vw, 46px); font-weight: 750; line-height: 1.02; }
+h2 { font-size: 24px; font-weight: 700; line-height: 1.1; }
+h3 { font-size: 16px; font-weight: 700; font-stretch: 85%; }
+p { margin: 0; max-width: 72ch; color: var(--ink-2); }
+.mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.label { font: 600 11px/1.2 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+a { color: var(--accent); }
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- barre du haut ---------- */
+.top {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+  margin-inline: -16px; padding: 10px 16px; background: var(--paper);
+  border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand svg { flex: none; }
+.brand b { font: 750 19px/1 var(--font-display); font-stretch: 72%; letter-spacing: 0.01em; }
+.brand span { font-size: 12px; color: var(--ink-3); display: block; margin-top: 2px; }
+.tabs { display: flex; gap: 2px; flex-wrap: wrap; }
+.tabs button {
+  border: 0; background: transparent; padding: 8px 12px; border-radius: var(--radius); cursor: pointer;
+  font-weight: 500; color: var(--ink-2);
+}
+.tabs button:hover { background: var(--accent-soft); color: var(--ink); }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+.theme-btn { margin-left: auto; border: 1px solid var(--rule); background: var(--panel); border-radius: 999px; padding: 6px 12px; cursor: pointer; font-size: 12px; color: var(--ink-2); }
+
+main { max-width: 1480px; margin: 0 auto; }
+section.view { padding-top: 24px; display: grid; gap: 22px; }
+.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius); padding: 16px; min-width: 0; }
+.panel > h3 + p, .panel > .label + p { margin-top: 4px; }
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 18px; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 18px; }
+.muted { color: var(--ink-3); }
+.small { font-size: 12px; }
+.loading { padding: 60px 0; text-align: center; color: var(--ink-3); }
+
+/* contrôles */
+.ctl { display: flex; flex-direction: column; gap: 4px; }
+.ctl > span { font: 600 11px/1 var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.ctl > span b { text-transform: none; letter-spacing: 0; color: var(--ink); font-weight: 500; }
+select, .btn {
+  background: var(--panel); border: 1px solid var(--grid-strong); border-radius: var(--radius);
+  padding: 6px 10px; min-height: 34px; cursor: pointer;
+}
+.btn:hover, select:hover { border-color: var(--ink-3); }
+.btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.seg { display: inline-flex; border: 1px solid var(--grid-strong); border-radius: var(--radius); overflow: hidden; }
+.seg button { border: 0; background: var(--panel); padding: 6px 10px; cursor: pointer; min-height: 32px; color: var(--ink-2); }
+.seg button + button { border-left: 1px solid var(--grid-strong); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+input[type="range"] { accent-color: var(--accent); width: 160px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--rule); }
+.chip.crisis { background: var(--crisis-soft); color: var(--crisis); border-color: transparent; }
+.chip.calm { background: var(--grid); color: var(--ink-2); border-color: transparent; }
+.chip.ok { color: var(--good); }
+.chip.bad { color: var(--crisis); }
+.swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none; }
+
+/* ---------- vue d'ensemble ---------- */
+.hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 28px; align-items: end; padding-top: 8px; }
+.hero p.lead { font-size: 16px; margin-top: 12px; color: var(--ink-2); }
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 2px solid var(--ink); }
+.kpi { padding: 12px 12px 4px 0; border-bottom: 1px solid var(--rule); }
+.kpi b { display: block; font: 700 30px/1.05 var(--font-display); font-stretch: 75%; font-variant-numeric: tabular-nums; }
+.kpi span { font-size: 12px; color: var(--ink-3); }
+.kpi.hl b { color: var(--crisis); }
+#hero-trace { width: 100%; height: 150px; display: block; }
+.pipeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0; counter-reset: step; }
+.step { position: relative; padding: 12px 14px 12px 0; border-top: 1px solid var(--rule); cursor: pointer; background: none; border-left: 0; border-right: 0; border-bottom: 0; text-align: left; }
+.step::before { counter-increment: step; content: counter(step, decimal-leading-zero); font: 500 11px var(--font-mono); color: var(--ink-3); display: block; }
+.step b { display: block; font: 700 15px/1.2 var(--font-display); font-stretch: 85%; margin-top: 4px; }
+.step span { font-size: 12px; color: var(--ink-2); display: block; margin-top: 2px; }
+.step:hover b { color: var(--accent); }
+.rec-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rec-table th { text-align: left; font: 600 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); padding: 6px 8px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+.rec-table td { padding: 5px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.rec-table tbody tr { cursor: pointer; }
+.rec-table tbody tr:hover { background: var(--accent-soft); }
+.rec-table td.tl { width: 100%; min-width: 180px; }
+.scroll-x { overflow-x: auto; }
+
+/* ---------- trace ---------- */
+.viewer { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.toolbar { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
+.canvas-wrap { position: relative; width: 100%; }
+#eeg { width: 100%; height: 560px; display: block; cursor: grab; touch-action: pan-y; }
+#eeg.dragging { cursor: grabbing; }
+#overview { width: 100%; height: 74px; display: block; cursor: pointer; margin-top: 8px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); align-items: center; }
+.legend i { display: inline-block; width: 18px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 5px; }
+.side { display: grid; gap: 14px; }
+.side .panel { padding: 14px; }
+.win-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.win-head b { font: 700 18px var(--font-display); font-stretch: 80%; }
+.prob-row { display: grid; grid-template-columns: 112px 1fr 42px; gap: 8px; align-items: center; font-size: 12px; margin-top: 6px; }
+.prob-bar { position: relative; height: 10px; background: var(--grid); border-radius: 2px; }
+.prob-bar > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; }
+.prob-bar > b { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
+#scalp, #spectrum, #featdots { width: 100%; display: block; }
+#scalp { height: 230px; }
+#spectrum { height: 170px; }
+#featdots { height: 300px; }
+.kbd { font: 500 11px var(--font-mono); border: 1px solid var(--grid-strong); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--ink-2); }
+
+/* ---------- modeles ---------- */
+.bench { width: 100%; border-collapse: collapse; }
+.bench th { text-align: left; font: 600 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); padding: 8px; border-bottom: 1px solid var(--rule); }
+.bench td { padding: 8px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+.bench td.m { white-space: nowrap; font-weight: 600; }
+.bench tr.best td { background: var(--accent-soft); }
+.bench tr.ref td { color: var(--ink-3); }
+.cell-bar { display: grid; grid-template-columns: 46px 1fr; gap: 8px; align-items: center; min-width: 120px; }
+.cell-bar span { font: 500 13px var(--font-mono); }
+.cell-bar i { display: block; height: 8px; background: var(--grid); border-radius: 2px; position: relative; overflow: hidden; }
+.cell-bar i > u { position: absolute; inset: 0 auto 0 0; background: var(--ink-3); border-radius: 2px; }
+.model-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.model-chips button { border: 1px solid var(--grid-strong); background: var(--panel); border-radius: 999px; padding: 5px 11px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.model-chips button[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); font-weight: 600; }
+.lab { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.metric-big { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0; border-top: 2px solid var(--ink); }
+.metric-big div { padding: 10px 0 6px; border-bottom: 1px solid var(--rule); }
+.metric-big b { font: 700 28px/1 var(--font-display); font-stretch: 75%; display: block; font-variant-numeric: tabular-nums; }
+.metric-big span { font-size: 12px; color: var(--ink-3); }
+.cm { display: grid; grid-template-columns: auto 1fr 1fr; gap: 3px; font-size: 12px; margin-top: 14px; }
+.cm div { padding: 10px 6px; border-radius: 3px; text-align: center; }
+.cm .h { color: var(--ink-3); padding: 2px; font-size: 11px; }
+.cm .v { font: 600 17px var(--font-mono); }
+.cm .v small { display: block; font: 400 11px var(--font-body); color: inherit; opacity: 0.85; }
+#pr, #f1curve, #patients, #depthcurve, #impurity, #scatter, #corr, #aucbars, #importance { width: 100%; display: block; }
+#pr, #f1curve { height: 260px; }
+#patients { height: 220px; }
+.events { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 14px; }
+.events div b { font: 700 22px var(--font-display); font-stretch: 75%; display: block; }
+.events div span { font-size: 12px; color: var(--ink-3); }
+.cm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.cm-mini { font-size: 11px; }
+.cm-mini h4 { margin: 0 0 4px; font: 600 12px var(--font-body); }
+.cm-mini .g { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.cm-mini .g div { padding: 6px 2px; text-align: center; border-radius: 2px; font: 500 12px var(--font-mono); }
+
+/* ---------- arbres ---------- */
+.tree-wrap { overflow: auto; border: 1px solid var(--grid); border-radius: var(--radius); background: var(--paper); max-height: 520px; }
+.tree-wrap svg { display: block; }
+.path-list { font: 12px/1.6 var(--font-mono); margin: 8px 0 0; padding: 0; list-style: none; }
+.path-list li { display: flex; gap: 8px; }
+.path-list li span.ans { color: var(--ink-3); }
+.path-list li.leaf { font-weight: 600; }
+#depthcurve { height: 280px; }
+#impurity { height: 220px; }
+.cmp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cmp-table td, .cmp-table th { padding: 6px 8px; border-bottom: 1px solid var(--grid); text-align: right; }
+.cmp-table th:first-child, .cmp-table td:first-child { text-align: left; color: var(--ink-2); }
+.cmp-table th { font: 600 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.formula { font: 14px/1.5 var(--font-mono); padding: 10px 12px; background: var(--paper); border-radius: var(--radius); border: 1px solid var(--grid); }
+
+/* ---------- caracteristiques ---------- */
+#scatter { height: 480px; cursor: crosshair; }
+#corr { height: 430px; }
+#aucbars { height: 360px; }
+#importance { height: 360px; }
+
+.tooltip {
+  position: fixed; z-index: 50; pointer-events: none; background: var(--ink); color: var(--paper);
+  padding: 6px 9px; border-radius: 4px; font-size: 12px; line-height: 1.4; max-width: 260px; opacity: 0; transition: opacity .08s;
+}
+.tooltip.on { opacity: 1; }
+.note { border-left: 3px solid var(--accent); padding: 8px 12px; background: var(--accent-soft); border-radius: 0 var(--radius) var(--radius) 0; font-size: 13px; color: var(--ink); max-width: none; }
+
+@media (max-width: 1100px) {
+  .viewer { grid-template-columns: 1fr; }
+  .side { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+  .lab { grid-template-columns: 1fr; }
+  .hero { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  #eeg { height: 460px; }
+  .brand span { display: none; }
+  .theme-btn { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header class="top">
+  <div class="brand">
+    <svg width="34" height="22" viewBox="0 0 34 22" aria-hidden="true"><path d="M1 11 H7 L9 4 L11 18 L13 6 L15 15 L17 11 H21 L23 2 L24.5 20 L26 8 L28 11 H33" fill="none" stroke="var(--crisis)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>
+    <div><b>Station EEG · Absences</b><span>Mini-projet Data Mining · ENIT</span></div>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Vues">
+    <button role="tab" data-view="apercu" aria-selected="true">Vue d'ensemble</button>
+    <button role="tab" data-view="trace">Tracé EEG</button>
+    <button role="tab" data-view="modeles">Modèles</button>
+    <button role="tab" data-view="arbres">Gini / Entropie</button>
+    <button role="tab" data-view="features">Caractéristiques</button>
+  </nav>
+  <button class="theme-btn" id="theme-btn" type="button">Thème : système</button>
+</header>
+
+<main>
+  <div class="loading" id="loading">Chargement des données…</div>
+
+  <!-- ===================================================== VUE D'ENSEMBLE -->
+  <section class="view" id="view-apercu" hidden>
+    <div class="hero">
+      <div>
+        <div class="label">Détection automatique des crises d'absence</div>
+        <h1>Du tracé EEG brut à un modèle qui repère les crises, fenêtre par fenêtre.</h1>
+        <p class="lead" id="hero-lead"></p>
+      </div>
+      <div>
+        <canvas id="hero-trace" aria-label="Extrait de tracé pendant une crise"></canvas>
+        <div class="kpis" id="kpis"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">La chaîne de traitement</div>
+      <div class="pipeline" id="pipeline" style="margin-top:10px"></div>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <h3>Les 19 enregistrements annotés</h3>
+          <p class="small">Chaque ligne est un patient. Les traits orange sont les crises annotées. Cliquez une ligne pour ouvrir le tracé sur sa première crise.</p>
+        </div>
+        <label class="ctl"><span>F1 par patient du modèle</span><select id="ov-model"></select></label>
+      </div>
+      <div class="scroll-x" style="margin-top:10px"><table class="rec-table" id="rec-table"></table></div>
+      <p class="small muted" id="excluded-note" style="margin-top:10px"></p>
+    </div>
+  </section>
+
+  <!-- ===================================================== TRACE -->
+  <section class="view" id="view-trace" hidden>
+    <div class="toolbar">
+      <label class="ctl"><span>Enregistrement</span><select id="rec-select"></select></label>
+      <div class="ctl"><span>Crises annotées</span>
+        <div class="row" style="gap:6px">
+          <button class="btn" id="prev-crisis" type="button" title="Crise précédente (P)">◀ Précédente</button>
+          <button class="btn" id="next-crisis" type="button" title="Crise suivante (N)">Suivante ▶</button>
+          <span class="small muted" id="crisis-pos"></span>
+        </div>
+      </div>
+      <div class="ctl"><span>Durée affichée</span>
+        <div class="seg" id="span-seg"><button data-v="10">10 s</button><button data-v="20" aria-pressed="true">20 s</button><button data-v="30">30 s</button><button data-v="60">60 s</button></div>
+      </div>
+      <div class="ctl"><span>Montage</span>
+        <div class="seg" id="montage-seg"><button data-v="all" aria-pressed="true">19 voies</button><button data-v="8">8 voies</button><button data-v="1">1 voie</button></div>
+      </div>
+      <label class="ctl" id="single-ch-wrap" hidden><span>Voie</span><select id="single-ch"></select></label>
+      <label class="ctl"><span>Sensibilité <b class="mono" id="sens-val">70 µV</b></span><input type="range" id="sens" min="10" max="400" step="5" value="70"></label>
+      <label class="ctl"><span>Modèle affiché</span><select id="tr-model"></select></label>
+      <label class="ctl"><span>Seuil de décision <b class="mono" id="thr-val">0,50</b></span><input type="range" id="thr" min="0.05" max="0.95" step="0.01" value="0.5"></label>
+    </div>
+
+    <div class="viewer">
+      <div class="panel" style="padding:12px">
+        <div class="canvas-wrap"><canvas id="eeg" aria-label="Tracé EEG multi-voies"></canvas></div>
+        <canvas id="overview" aria-label="Vue de tout l'enregistrement"></canvas>
+        <div class="row" style="justify-content:space-between;margin-top:8px">
+          <div class="legend">
+            <span><i style="background:var(--crisis-soft);outline:1px solid var(--crisis)"></i>Crise annotée</span>
+            <span><i style="background:var(--accent);opacity:.75"></i>Crise prédite (proba ≥ seuil)</span>
+            <span><i style="background:transparent;outline:2px solid var(--accent)"></i>Fenêtre de 2 s sélectionnée</span>
+          </div>
+          <div class="small muted">Glisser pour se déplacer · clic = choisir une fenêtre · <span class="kbd">←</span> <span class="kbd">→</span> <span class="kbd">N</span> <span class="kbd">P</span></div>
+        </div>
+        <p class="small muted" style="margin-top:8px">Signal filtré (coupe-bande 50 Hz, passe-bande 0,5–40 Hz), affiché à 128 Hz. Les probabilités viennent d'une validation par patient : chaque enregistrement est prédit par un modèle entraîné <b>sans lui</b>.</p>
+      </div>
+
+      <aside class="side">
+        <div class="panel">
+          <div class="win-head"><b id="win-title">Fenêtre</b><span id="win-truth"></span></div>
+          <p class="small" id="win-sub"></p>
+          <div id="win-probs" style="margin-top:6px"></div>
+        </div>
+        <div class="panel">
+          <div class="label">Amplitude par électrode (système 10-20)</div>
+          <canvas id="scalp" aria-label="Carte du scalp"></canvas>
+          <p class="small muted">Écart-type de chaque voie sur la fenêtre. Une absence est <b>généralisée</b> : toutes les électrodes s'allument ensemble.</p>
+        </div>
+        <div class="panel">
+          <div class="label">Spectre de la fenêtre (FFT)</div>
+          <canvas id="spectrum" aria-label="Spectre"></canvas>
+          <p class="small muted">Spectre médian des 19 voies, calculé dans le navigateur (FFT 256 points, fenêtre de Hann).</p>
+        </div>
+        <div class="panel">
+          <div class="label">Les 12 caractéristiques de cette fenêtre</div>
+          <canvas id="featdots" aria-label="Caractéristiques"></canvas>
+          <p class="small muted">Échelle log. Losange : cette fenêtre. Repères : médiane hors crise et médiane en crise.</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===================================================== MODELES -->
+  <section class="view" id="view-modeles" hidden>
+    <div>
+      <div class="label">Question 12 et Partie IX</div>
+      <h2>Comparaison des modèles</h2>
+    </div>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between">
+        <div class="seg" id="bench-seg">
+          <button data-v="test" aria-pressed="true">Test 80/20 stratifié</button>
+          <button data-v="group">Nouveau patient (par enregistrement)</button>
+        </div>
+        <p class="small" id="bench-note" style="max-width:62ch"></p>
+      </div>
+      <div class="scroll-x" style="margin-top:12px"><table class="bench" id="bench"></table></div>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div>
+          <h3>Laboratoire du seuil</h3>
+          <p class="small">Un modèle donne une probabilité de crise ; on annonce « crise » au-dessus du seuil. Baisser le seuil détecte plus de crises (Recall) mais crée plus de fausses alarmes (Precision). Prédictions par patient, sur les 28 994 fenêtres.</p>
+        </div>
+        <div class="model-chips" id="lab-models"></div>
+      </div>
+      <div class="lab" style="margin-top:14px">
+        <div>
+          <label class="ctl"><span>Seuil <b class="mono" id="lab-thr-val">0,50</b></span><input type="range" id="lab-thr" min="0.02" max="0.98" step="0.01" value="0.5" style="width:100%"></label>
+          <div class="row" style="margin-top:6px;gap:6px">
+            <button class="btn" type="button" id="thr-default">Seuil 0,50</button>
+            <button class="btn" type="button" id="thr-best">Seuil du meilleur F1</button>
+          </div>
+          <div class="metric-big" style="margin-top:14px" id="lab-metrics"></div>
+          <div class="cm" id="lab-cm"></div>
+          <div class="events" id="lab-events"></div>
+        </div>
+        <div><div class="label">Courbe Precision / Recall</div><canvas id="pr"></canvas></div>
+        <div><div class="label">Métriques selon le seuil</div><canvas id="f1curve"></canvas></div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="label">F1 par patient au seuil choisi (cliquer une barre pour ouvrir le tracé)</div>
+        <canvas id="patients"></canvas>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Matrices de confusion sur le test 80/20</h3>
+      <p class="small">5 799 fenêtres de test, dont 236 en crise. Lignes : vérité ; colonnes : prédiction.</p>
+      <div class="cm-grid" id="cm-grid" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <!-- ===================================================== ARBRES -->
+  <section class="view" id="view-arbres" hidden>
+    <div>
+      <div class="label">Modèle 1 : arbre de décision</div>
+      <h2>Indice de Gini ou entropie ?</h2>
+    </div>
+    <div class="grid-2">
+      <div class="panel">
+        <h3>Deux mesures d'impureté</h3>
+        <p class="small">À chaque nœud, l'arbre choisit la question qui rend les deux groupes obtenus les plus purs. Avec p la part de fenêtres de crise dans le nœud :</p>
+        <div class="grid-2" style="gap:8px;margin-top:10px">
+          <div class="formula"><span class="label" style="color:var(--m5)">Gini</span><br>1 − p² − (1 − p)²</div>
+          <div class="formula"><span class="label" style="color:var(--m6)">Entropie</span><br>− p log₂ p − (1 − p) log₂(1 − p)</div>
+        </div>
+        <canvas id="impurity" style="margin-top:10px"></canvas>
+      </div>
+      <div class="panel">
+        <h3>F1 selon la profondeur</h3>
+        <p class="small">Validation croisée à 5 plis (trait plein) et entraînement (pointillés). Au-delà de 8 niveaux, l'arbre apprend par cœur.</p>
+        <canvas id="depthcurve"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between">
+        <h3>Les deux arbres optimisés</h3>
+        <div class="row">
+          <label class="ctl"><span>Niveaux affichés <b class="mono" id="depth-val">2</b></span><input type="range" id="tree-depth" min="1" max="8" value="2"></label>
+          <button class="btn" type="button" id="random-crisis">Suivre une fenêtre de crise au hasard</button>
+          <button class="btn" type="button" id="random-calm">… hors crise</button>
+        </div>
+      </div>
+      <div class="scroll-x"><table class="cmp-table" id="tree-cmp" style="margin-top:10px"></table></div>
+      <p class="small" id="tree-follow" style="margin-top:10px"></p>
+      <div class="grid-2" style="margin-top:12px">
+        <div><div class="label" style="color:var(--m5)">Gini</div><div class="tree-wrap" id="tree-gini"></div><ul class="path-list" id="path-gini"></ul></div>
+        <div><div class="label" style="color:var(--m6)">Entropie</div><div class="tree-wrap" id="tree-entropy"></div><ul class="path-list" id="path-entropy"></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================== CARACTERISTIQUES -->
+  <section class="view" id="view-features" hidden>
+    <div>
+      <div class="label">Parties V à VII</div>
+      <h2>L'espace des caractéristiques</h2>
+    </div>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <label class="ctl"><span>Axe horizontal</span><select id="sx"></select></label>
+          <label class="ctl"><span>Axe vertical</span><select id="sy"></select></label>
+          <div class="ctl"><span>Échelle</span><div class="seg" id="scale-seg"><button data-v="log" aria-pressed="true">Log</button><button data-v="lin">Linéaire</button></div></div>
+        </div>
+        <div class="legend"><span><i style="background:var(--calm)"></i>Hors crise (27 812)</span><span><i style="background:var(--crisis)"></i>Crise (1 182)</span></div>
+      </div>
+      <canvas id="scatter" style="margin-top:10px" aria-label="Nuage de points"></canvas>
+      <p class="small muted" id="scatter-note">Survoler un point pour voir sa fenêtre, cliquer pour l'ouvrir dans le tracé.</p>
+    </div>
+    <div class="grid-2">
+      <div class="panel">
+        <h3>Pouvoir discriminant de chaque variable seule</h3>
+        <p class="small">AUC : probabilité qu'une fenêtre de crise ait une valeur plus grande qu'une fenêtre hors crise (0,5 = rien, 1 = parfait). Le rapport des médianes est à droite.</p>
+        <canvas id="aucbars"></canvas>
+      </div>
+      <div class="panel">
+        <div class="row" style="justify-content:space-between">
+          <h3>Corrélations</h3>
+          <div class="seg" id="corr-seg"><button data-v="pearson" aria-pressed="true">Pearson</button><button data-v="spearman">Spearman</button></div>
+        </div>
+        <p class="small">Std et RMS, Variance et Energy portent la même information. Variance = Std² : Pearson ne voit que le lien linéaire (0,82), Spearman le voit en entier (1,00).</p>
+        <canvas id="corr"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Variables utilisées par les modèles à base d'arbres</h3>
+      <p class="small">Importance = part de la baisse d'impureté apportée par chaque variable.</p>
+      <canvas id="importance"></canvas>
+    </div>
+  </section>
+</main>
+<div class="tooltip" id="tip"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   Outils
+   ===================================================================== */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const fr = (x, d = 2) => Number(x).toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
+const frInt = (x) => Number(x).toLocaleString("fr-FR");
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const fmtTime = (s) => { s = Math.max(0, Math.round(s)); const m = Math.floor(s / 60); return `${m}:${String(s % 60).padStart(2, "0")}`; };
+const tip = $("#tip");
+function showTip(html, x, y) { tip.innerHTML = html; tip.classList.add("on"); const w = tip.offsetWidth, h = tip.offsetHeight; tip.style.left = clamp(x + 14, 4, innerWidth - w - 4) + "px"; tip.style.top = clamp(y + 14, 4, innerHeight - h - 4) + "px"; }
+function hideTip() { tip.classList.remove("on"); }
+function storeGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
+function storeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* stockage indisponible */ } }
+
+function setupCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return { ctx, w, h };
+}
+function niceTicks(a, b, n = 5) {
+  const span = b - a; if (span <= 0) return [a];
+  const step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= step0) || mag * 10;
+  const out = []; for (let v = Math.ceil(a / step) * step; v <= b + 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+function axisText(ctx, size = 11) { ctx.font = `${size}px "IBM Plex Mono", ui-monospace, monospace`; ctx.fillStyle = css("--ink-3"); }
+function supNum(e) { const m = { "-": "⁻", 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" }; return String(e).split("").map((c) => m[c] ?? c).join(""); }
+
+/* =====================================================================
+   Etat
+   ===================================================================== */
+let META = null;
+const S = {
+  view: "apercu", rec: 0, t0: 0, span: 20, sens: 70, montage: "all", singleCh: 0,
+  model: "Random Forest", thr: 0.5, sel: null, // index global de la fenetre selectionnee
+  labModel: "Random Forest", labThr: 0.5, bench: "test", treeDepth: 2, follow: null,
+  sx: "Theta", sy: "Amplitude", scale: "log", corr: "pearson",
+};
+const MODEL_COLORS = { "Random Forest": "--m1", "Gradient Boosting": "--m2", "SVM (RBF)": "--m3", "KNN": "--m4", "Decision Tree (Gini)": "--m5", "Decision Tree (Entropie)": "--m6" };
+const SHORT = { "Random Forest": "Random Forest", "Gradient Boosting": "Gradient Boosting", "SVM (RBF)": "SVM (RBF)", "KNN": "KNN", "Decision Tree (Gini)": "Arbre (Gini)", "Decision Tree (Entropie)": "Arbre (Entropie)" };
+const modelColor = (m) => css(MODEL_COLORS[m] || "--ink-3");
+const EIGHT = ["Fp1", "Fp2", "C3", "C4", "T3", "T4", "O1", "O2"];
+const SCALP = { Fp1: [-0.3, -0.86], Fp2: [0.3, -0.86], F7: [-0.72, -0.52], F3: [-0.36, -0.46], Fz: [0, -0.44], F4: [0.36, -0.46], F8: [0.72, -0.52], T3: [-0.9, 0], C3: [-0.45, 0], Cz: [0, 0], C4: [0.45, 0], T4: [0.9, 0], T5: [-0.72, 0.52], P3: [-0.36, 0.46], Pz: [0, 0.44], P4: [0.36, 0.46], T6: [0.72, 0.52], O1: [-0.3, 0.86], O2: [0.3, 0.86] };
+
+/* =====================================================================
+   Donnees
+   ===================================================================== */
+const chunkCache = new Map();
+const pending = new Map();
+function chunkKey(r, k) { return `${META.recordings[r].id}/${k}`; }
+function loadChunk(r, k) {
+  const key = chunkKey(r, k);
+  if (chunkCache.has(key)) return Promise.resolve(chunkCache.get(key));
+  if (pending.has(key)) return pending.get(key);
+  const rec = META.recordings[r], per = PER_CHUNK(), n = Math.min(per, rec.samples - k * per);
+  const p = fetch(`data/sig/${key}.png`).then((res) => { if (!res.ok) throw new Error(res.status); return res.arrayBuffer(); })
+    .then(decodePng).then((bytes) => { const a = unpackBlock(bytes, n); chunkCache.set(key, a); pending.delete(key); return a; })
+    .catch((e) => { pending.delete(key); console.warn("bloc", key, e); return null; });
+  pending.set(key, p);
+  return p;
+}
+/* Les blocs de signal sont des PNG gris 8 bits (sans perte, filtre 0) : on lit les octets
+   directement, sans passer par un canvas, pour qu'aucune gestion des couleurs ne les modifie. */
+async function decodePng(buf) {
+  const dv = new DataView(buf), idat = []; let p = 8, w = 0, h = 0;
+  while (p < buf.byteLength) {
+    const len = dv.getUint32(p), type = String.fromCharCode(...new Uint8Array(buf, p + 4, 4));
+    if (type === "IHDR") { w = dv.getUint32(p + 8); h = dv.getUint32(p + 12); }
+    else if (type === "IDAT") idat.push(new Uint8Array(buf, p + 8, len));
+    else if (type === "IEND") break;
+    p += 12 + len;
+  }
+  const stream = new Blob(idat).stream().pipeThrough(new DecompressionStream("deflate"));
+  const raw = new Uint8Array(await new Response(stream).arrayBuffer());
+  const out = new Uint8Array(w * h);
+  for (let r = 0; r < h; r++) out.set(raw.subarray(r * (w + 1) + 1, r * (w + 1) + 1 + w), r * w);
+  return out;
+}
+/* Pour chaque voie : n octets de poids fort puis n de poids faible des differences successives. */
+function unpackBlock(bytes, n) {
+  const nch = META.signal.channels.length, out = new Int16Array(nch * n);
+  for (let c = 0; c < nch; c++) {
+    const hi = c * 2 * n, lo = hi + n; let acc = 0;
+    for (let i = 0; i < n; i++) { acc = (acc + ((bytes[hi + i] << 8) | bytes[lo + i])) & 0xffff; out[c * n + i] = acc > 32767 ? acc - 65536 : acc; }
+  }
+  return out;
+}
+const NCH = () => META.signal.channels.length;
+const RATE = () => META.signal.rate;
+const PER_CHUNK = () => META.signal.chunk_s * META.signal.rate;
+/** Echantillons [i0, i1[ d'une voie ; null si un bloc manque (il est alors demande). */
+function samples(r, ch, i0, i1) {
+  const per = PER_CHUNK(), out = new Float32Array(Math.max(0, i1 - i0)), step = META.signal.step_uv;
+  let missing = false;
+  for (let k = Math.floor(i0 / per); k <= Math.floor((i1 - 1) / per); k++) {
+    const a = chunkCache.get(chunkKey(r, k));
+    if (!a) { missing = true; loadChunk(r, k).then(() => scheduleDraw()); continue; }
+    const n = a.length / NCH(), base = ch * n, start = Math.max(i0, k * per), end = Math.min(i1, k * per + n);
+    for (let i = start; i < end; i++) out[i - i0] = a[base + i - k * per] * step;
+  }
+  return missing ? null : out;
+}
+function windowIndex(r, startSec) { const rec = META.recordings[r]; const i = clamp(Math.round(startSec), 0, rec.windows - 1); return rec.offset + i; }
+const W = () => META.windows;
+
+/* =====================================================================
+   Navigation
+   ===================================================================== */
+function showView(v) {
+  S.view = v;
+  $$(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === v)));
+  $$("section.view").forEach((s) => (s.hidden = s.id !== `view-${v}`));
+  if (location.hash.slice(1) !== v) history.replaceState(null, "", `#${v}`);
+  requestAnimationFrame(drawAll);
+}
+$$(".tabs button").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+
+let drawQueued = false;
+function scheduleDraw() { if (drawQueued) return; drawQueued = true; requestAnimationFrame(() => { drawQueued = false; drawAll(); }); }
+function drawAll() {
+  if (!META) return;
+  if (S.view === "apercu") drawOverviewPage();
+  if (S.view === "trace") drawTrace();
+  if (S.view === "modeles") drawModels();
+  if (S.view === "arbres") drawTrees();
+  if (S.view === "features") drawFeatures();
+}
+addEventListener("resize", scheduleDraw);
+addEventListener("hashchange", () => { const v = location.hash.slice(1); if (["apercu", "trace", "modeles", "arbres", "features"].includes(v)) showView(v); });
+
+/* theme */
+const THEMES = ["system", "light", "dark"];
+function applyTheme(t) {
+  if (t === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t);
+  $("#theme-btn").textContent = "Thème : " + { system: "système", light: "clair", dark: "sombre" }[t];
+  storeSet("eeg-theme", t); scheduleDraw();
+}
+$("#theme-btn").addEventListener("click", () => { const cur = storeGet("eeg-theme", "system"); applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % 3]); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", scheduleDraw);
+
+function openTrace(r, atSec, selectWindow = true) {
+  S.rec = r; $("#rec-select").value = String(r);
+  const rec = META.recordings[r];
+  S.t0 = clamp(atSec - S.span * 0.3, 0, Math.max(0, rec.duration - S.span));
+  if (selectWindow) S.sel = windowIndex(r, atSec);
+  showView("trace");
+}
+
+/* =====================================================================
+   VUE D'ENSEMBLE
+   ===================================================================== */
+function buildOverview() {
+  const recs = META.recordings, w = W();
+  const nCrises = recs.reduce((a, r) => a + r.seizures.length, 0);
+  const hours = recs.reduce((a, r) => a + r.duration, 0) / 3600;
+  const nWin = w.cls.length, nPos = w.cls.reduce((a, b) => a + b, 0);
+  const best = Object.entries(META.results.test).filter(([k]) => !k.startsWith("Reference")).sort((a, b) => b[1]["F1-score"] - a[1]["F1-score"])[0];
+  $("#hero-lead").innerHTML = `${recs.length} enregistrements d'enfants et d'adultes, ${nCrises} crises annotées par les médecins, ${fr(hours, 1)} heures de signal à 256 Hz sur 19 électrodes. Chaque fenêtre de 2 s est décrite par 12 caractéristiques, puis classée par 6 modèles. Ouvrez le <a href="#trace">tracé</a> pour voir les crises et ce que les modèles en pensent.`;
+  $("#kpis").innerHTML = [
+    [recs.length, "enregistrements"], [nCrises, "crises annotées"], [fr(hours, 1) + " h", "de signal"],
+    [frInt(nWin), "fenêtres de 2 s"], [fr(nPos / nWin * 100, 1) + " %", "fenêtres en crise", true],
+    [fr(best[1]["F1-score"], 2), `meilleur F1 (${SHORT[best[0]]})`],
+  ].map(([v, l, hl]) => `<div class="kpi${hl ? " hl" : ""}"><b>${v}</b><span>${l}</span></div>`).join("");
+  const steps = [
+    ["Signal EEG", "19 voies, 256 Hz, fichiers MATLAB", "trace"],
+    ["Prétraitement", "coupe-bande 50 Hz, passe-bande 0,5–40 Hz", "trace"],
+    ["Annotations", "heures − DebutTrace, contrôle qualité", "apercu"],
+    ["Fenêtres", "2 s, recouvrement 50 %, classe si ≥ 50 % en crise", "trace"],
+    ["Caractéristiques", "8 temporelles + 4 bandes FFT", "features"],
+    ["Modèles", "arbres Gini/entropie, RF, KNN, SVM, boosting", "arbres"],
+    ["Évaluation", "Precision, Recall, F1, par patient", "modeles"],
+  ];
+  $("#pipeline").innerHTML = steps.map(([t, d, v]) => `<button class="step" type="button" data-go="${v}"><b>${t}</b><span>${d}</span></button>`).join("");
+  $$("#pipeline .step").forEach((b) => b.addEventListener("click", () => showView(b.dataset.go)));
+  $("#excluded-note").textContent = `Exclus faute d'annotation : ${META.excluded.join(", ")}. Corrections appliquées au fichier : ${META.issues.map((i) => i.enregistrement).join(", ")} (doublons, faute de saisie, nombre de crises).`;
+  const sel = $("#ov-model");
+  sel.innerHTML = META.models.map((m) => `<option ${m === S.model ? "selected" : ""}>${m}</option>`).join("");
+  sel.addEventListener("change", () => { buildRecTable(sel.value); });
+  buildRecTable(S.model);
+}
+function patientStats(model, thr) {
+  const w = W(), p = w.proba[model], out = META.recordings.map(() => ({ tp: 0, fp: 0, fn: 0, tn: 0 }));
+  for (let i = 0; i < p.length; i++) {
+    const o = out[w.recording[i]], pred = p[i] >= thr, y = w.cls[i] === 1;
+    if (pred && y) o.tp++; else if (pred) o.fp++; else if (y) o.fn++; else o.tn++;
+  }
+  return out.map((o) => ({ ...o, f1: o.tp ? (2 * o.tp) / (2 * o.tp + o.fp + o.fn) : 0 }));
+}
+function buildRecTable(model) {
+  const stats = patientStats(model, 0.5);
+  const maxDur = Math.max(...META.recordings.map((r) => r.duration));
+  const rows = META.recordings.map((r, i) => {
+    const ticks = r.seizures.map(([a, b]) => `<rect x="${(a / maxDur) * 100}%" y="2" width="${Math.max(0.35, ((b - a) / maxDur) * 100)}%" height="14" fill="var(--crisis)"/>`).join("");
+    const f1 = stats[i].f1;
+    return `<tr data-r="${i}"><td class="mono">${r.label}</td><td class="num">${fmtTime(r.duration)}</td><td class="num">${r.seizures.length}</td>
+      <td class="num">${r.crisis_windows} / ${frInt(r.windows)}</td>
+      <td class="tl"><svg width="100%" height="18" aria-hidden="true"><rect x="0" y="8" width="${(r.duration / maxDur) * 100}%" height="2" fill="var(--grid-strong)"/>${ticks}</svg></td>
+      <td><div class="cell-bar"><span>${fr(f1, 2)}</span><i><u style="width:${f1 * 100}%;background:${modelColor(model)}"></u></i></div></td></tr>`;
+  }).join("");
+  $("#rec-table").innerHTML = `<thead><tr><th>Enregistrement</th><th>Durée</th><th>Crises</th><th>Fenêtres en crise</th><th>Crises dans le temps</th><th>F1 par patient</th></tr></thead><tbody>${rows}</tbody>`;
+  $$("#rec-table tbody tr").forEach((tr) => tr.addEventListener("click", () => { const r = +tr.dataset.r; const s = META.recordings[r].seizures[0]; openTrace(r, s ? s[0] : 0); }));
+}
+let heroData = null;
+function drawOverviewPage() {
+  const cv = $("#hero-trace"); const { ctx, w, h } = setupCanvas(cv);
+  const r = META.recordings.findIndex((x) => x.id === "230102B_F_0000"); const rr = r < 0 ? 0 : r;
+  const seiz = META.recordings[rr].seizures[6] || META.recordings[rr].seizures[0];
+  const t0 = seiz[0] - 4, t1 = seiz[0] + 8, rate = RATE();
+  const chs = ["Fp1", "C3", "O1"].map((c) => META.signal.channels.indexOf(c));
+  const data = chs.map((c) => samples(rr, c, Math.round(t0 * rate), Math.round(t1 * rate)));
+  if (data.some((d) => !d)) return;
+  const lane = h / chs.length, x = (t) => ((t - t0) / (t1 - t0)) * w;
+  ctx.fillStyle = css("--crisis-soft"); ctx.fillRect(x(seiz[0]), 0, w - x(seiz[0]), h);
+  data.forEach((d, k) => {
+    const mid = lane * (k + 0.5); ctx.beginPath(); ctx.lineWidth = 1.2; ctx.strokeStyle = css("--trace");
+    for (let i = 0; i < d.length; i++) { const xx = (i / d.length) * w, yy = mid - d[i] * (lane / 520); i ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); }
+    ctx.stroke(); axisText(ctx, 10); ctx.fillText(META.signal.channels[chs[k]], 4, mid - lane * 0.3);
+  });
+  axisText(ctx, 10); ctx.fillStyle = css("--crisis"); ctx.fillText(`crise · ${META.recordings[rr].label} · ${fmtTime(seiz[0])}`, x(seiz[0]) + 6, 12);
+}
+
+/* =====================================================================
+   TRACE
+   ===================================================================== */
+function visibleChannels() {
+  const names = META.signal.channels;
+  if (S.montage === "8") return EIGHT.map((c) => names.indexOf(c)).filter((i) => i >= 0);
+  if (S.montage === "1") return [S.singleCh];
+  return names.map((_, i) => i);
+}
+function buildTrace() {
+  const recSel = $("#rec-select");
+  recSel.innerHTML = META.recordings.map((r, i) => `<option value="${i}">${r.label} · ${r.seizures.length} crise${r.seizures.length > 1 ? "s" : ""} · ${fmtTime(r.duration)}</option>`).join("");
+  recSel.addEventListener("change", () => { const r = +recSel.value; const s = META.recordings[r].seizures[0]; openTrace(r, s ? s[0] : 0); });
+  $("#single-ch").innerHTML = META.signal.channels.map((c, i) => `<option value="${i}">${c}</option>`).join("");
+  $("#single-ch").addEventListener("change", (e) => { S.singleCh = +e.target.value; scheduleDraw(); });
+  const tm = $("#tr-model"); tm.innerHTML = META.models.map((m) => `<option ${m === S.model ? "selected" : ""}>${m}</option>`).join("");
+  tm.addEventListener("change", () => { S.model = tm.value; scheduleDraw(); });
+  segment($("#span-seg"), (v) => { const c = S.t0 + S.span / 2; S.span = +v; S.t0 = clampT(c - S.span / 2); });
+  segment($("#montage-seg"), (v) => { S.montage = v; $("#single-ch-wrap").hidden = v !== "1"; });
+  $("#sens").addEventListener("input", (e) => { S.sens = +e.target.value; $("#sens-val").textContent = `${S.sens} µV`; scheduleDraw(); });
+  $("#thr").addEventListener("input", (e) => { S.thr = +e.target.value; $("#thr-val").textContent = fr(S.thr, 2); scheduleDraw(); });
+  $("#prev-crisis").addEventListener("click", () => jumpCrisis(-1));
+  $("#next-crisis").addEventListener("click", () => jumpCrisis(1));
+
+  const cv = $("#eeg"); let drag = null;
+  cv.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, t0: S.t0, moved: false }; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener("pointermove", (e) => {
+    if (drag) { const dx = e.clientX - drag.x; if (Math.abs(dx) > 3) { drag.moved = true; cv.classList.add("dragging"); } S.t0 = clampT(drag.t0 - (dx / traceGeom.plotW) * S.span); scheduleDraw(); return; }
+    const t = timeAt(e); if (t === null) { hideTip(); return; }
+    showTip(`<b>${fmtTime(t)}</b> · ${fr(t, 1)} s`, e.clientX, e.clientY);
+  });
+  cv.addEventListener("pointerup", (e) => { cv.classList.remove("dragging"); if (drag && !drag.moved) { const t = timeAt(e); if (t !== null) { S.sel = windowIndex(S.rec, t - 1); scheduleDraw(); } } drag = null; });
+  cv.addEventListener("pointerleave", hideTip);
+  cv.addEventListener("wheel", (e) => { if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) { e.preventDefault(); S.t0 = clampT(S.t0 + ((e.deltaX || e.deltaY) / traceGeom.plotW) * S.span); scheduleDraw(); } }, { passive: false });
+
+  const ov = $("#overview"); let ovDrag = false;
+  const ovJump = (e) => { const rect = ov.getBoundingClientRect(); const t = ((e.clientX - rect.left) / rect.width) * META.recordings[S.rec].duration; S.t0 = clampT(t - S.span / 2); scheduleDraw(); };
+  ov.addEventListener("pointerdown", (e) => { ovDrag = true; ov.setPointerCapture(e.pointerId); ovJump(e); });
+  ov.addEventListener("pointermove", (e) => { if (ovDrag) ovJump(e); });
+  ov.addEventListener("pointerup", () => (ovDrag = false));
+
+  addEventListener("keydown", (e) => {
+    if (S.view !== "trace" || e.target.closest("select,input")) return;
+    if (e.key === "ArrowRight") { S.t0 = clampT(S.t0 + S.span / 2); scheduleDraw(); }
+    else if (e.key === "ArrowLeft") { S.t0 = clampT(S.t0 - S.span / 2); scheduleDraw(); }
+    else if (e.key.toLowerCase() === "n") jumpCrisis(1);
+    else if (e.key.toLowerCase() === "p") jumpCrisis(-1);
+  });
+}
+function segment(el, onChange) {
+  el.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    $$("button", el).forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    onChange(b.dataset.v); scheduleDraw();
+  });
+}
+function clampT(t) { return clamp(t, 0, Math.max(0, META.recordings[S.rec].duration - S.span)); }
+function jumpCrisis(dir) {
+  const seiz = META.recordings[S.rec].seizures; if (!seiz.length) return;
+  const center = S.t0 + S.span * 0.3;
+  let k = dir > 0 ? seiz.findIndex(([a]) => a > center + 0.5) : seiz.map(([a]) => a < center - 0.5).lastIndexOf(true);
+  if (k < 0) k = dir > 0 ? 0 : seiz.length - 1;
+  openTrace(S.rec, seiz[k][0]);
+}
+let traceGeom = { left: 46, plotW: 100, top: 6 };
+function timeAt(e) {
+  const rect = $("#eeg").getBoundingClientRect(); const x = e.clientX - rect.left - traceGeom.left;
+  if (x < 0 || x > traceGeom.plotW) return null;
+  return S.t0 + (x / traceGeom.plotW) * S.span;
+}
+function drawTrace() {
+  const r = S.rec, rec = META.recordings[r], rate = RATE();
+  const cv = $("#eeg"); const { ctx, w, h } = setupCanvas(cv);
+  const left = 46, right = 8, laneBottom = 50, top = 6;
+  const plotW = w - left - right, plotH = h - top - laneBottom;
+  traceGeom = { left, plotW, top };
+  const t0 = S.t0, t1 = S.t0 + S.span, X = (t) => left + ((t - t0) / S.span) * plotW;
+  const chs = visibleChannels(); const lane = plotH / chs.length;
+
+  // grille : une ligne par seconde, plus marquee toutes les 5 s
+  for (let s = Math.ceil(t0); s <= t1; s++) {
+    ctx.strokeStyle = s % 5 === 0 ? css("--grid-strong") : css("--grid"); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(Math.round(X(s)) + 0.5, top); ctx.lineTo(Math.round(X(s)) + 0.5, top + plotH + laneBottom - 6); ctx.stroke();
+    const every = [1, 2, 5, 10, 15, 30].find((k) => (plotW / S.span) * k >= 52) || 30;
+    if (s % every === 0) { axisText(ctx, 10); ctx.textAlign = "center"; ctx.fillText(fmtTime(s), X(s), h - 2); ctx.textAlign = "left"; }
+  }
+  // crises annotees
+  rec.seizures.forEach(([a, b]) => { if (b < t0 || a > t1) return; ctx.fillStyle = css("--crisis-soft"); ctx.fillRect(X(a), top, X(b) - X(a), plotH); ctx.fillStyle = css("--crisis"); ctx.fillRect(X(a), top + plotH + 8, X(b) - X(a), 12); });
+  // fenetre selectionnee
+  if (S.sel !== null && W().recording[S.sel] === r) {
+    const ws = W().start[S.sel]; ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2;
+    ctx.strokeRect(X(ws) + 1, top + 1, X(ws + 2) - X(ws) - 2, plotH - 2);
+  }
+  // signaux
+  const i0 = Math.max(0, Math.floor(t0 * rate)), i1 = Math.min(rec.samples, Math.ceil(t1 * rate) + 1);
+  const gain = (lane / 2) / S.sens * 0.9; let missing = false;
+  ctx.save(); ctx.beginPath(); ctx.rect(left, top, plotW, plotH); ctx.clip();
+  chs.forEach((ch, k) => {
+    const d = samples(r, ch, i0, i1); const mid = top + lane * (k + 0.5);
+    if (!d) { missing = true; return; }
+    ctx.strokeStyle = css("--trace"); ctx.lineWidth = chs.length > 10 ? 0.75 : 1.1; ctx.beginPath();
+    const perPx = d.length / plotW;
+    if (perPx > 6) {
+      for (let px = 0; px < plotW; px++) {
+        const a = Math.floor(px * perPx), b = Math.min(d.length, Math.floor((px + 1) * perPx)); let mn = Infinity, mx = -Infinity;
+        for (let i = a; i < b; i++) { if (d[i] < mn) mn = d[i]; if (d[i] > mx) mx = d[i]; }
+        ctx.moveTo(left + px + 0.5, mid - mx * gain); ctx.lineTo(left + px + 0.5, mid - mn * gain);
+      }
+    } else {
+      for (let i = 0; i < d.length; i++) { const x = X((i0 + i) / rate), y = mid - d[i] * gain; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    }
+    ctx.stroke();
+  });
+  ctx.restore();
+  chs.forEach((ch, k) => { const mid = top + lane * (k + 0.5); ctx.font = `600 ${chs.length > 10 ? 10 : 12}px "IBM Plex Mono", monospace`; ctx.fillStyle = css("--ink-2"); ctx.fillText(META.signal.channels[ch], 4, mid + 4); });
+  // echelle d'amplitude
+  const bar = S.sens * gain * 2 / 0.9 * 0.9; ctx.strokeStyle = css("--ink-2"); ctx.lineWidth = 2; ctx.beginPath();
+  ctx.moveTo(left + plotW - 6, top + plotH - 8); ctx.lineTo(left + plotW - 6, top + plotH - 8 - Math.min(bar, plotH * 0.4)); ctx.stroke();
+  axisText(ctx, 10); ctx.textAlign = "right"; ctx.fillText(`${Math.round(Math.min(bar, plotH * 0.4) / gain)} µV`, left + plotW - 10, top + plotH - 10); ctx.textAlign = "left";
+  // couloirs annotation / modele
+  axisText(ctx, 10); ctx.fillText("Annot.", 4, top + plotH + 18); ctx.fillText("Modèle", 4, top + plotH + 36);
+  const w8 = W(), pr = w8.proba[S.model];
+  for (let s = Math.max(0, Math.floor(t0) - 2); s < Math.min(rec.windows, t1); s++) {
+    const gi = rec.offset + s, p = pr[gi], x0 = X(s + 0.5), x1 = X(s + 1.5); // centre de la fenetre de 2 s
+    ctx.globalAlpha = 0.15 + 0.85 * p; ctx.fillStyle = p >= S.thr ? css("--accent") : css("--calm");
+    ctx.fillRect(x0, top + plotH + 26, Math.max(1, x1 - x0 - 0.5), p >= S.thr ? 14 : 6 + 8 * p);
+  }
+  ctx.globalAlpha = 1;
+  if (missing) { axisText(ctx, 12); ctx.textAlign = "center"; ctx.fillText("chargement du signal…", left + plotW / 2, top + plotH / 2); ctx.textAlign = "left"; }
+
+  drawOverviewStrip();
+  const seiz = rec.seizures, center = S.t0 + S.span / 2, inside = seiz.findIndex(([a, b]) => center >= a - S.span / 2 && center <= b + S.span / 2);
+  $("#crisis-pos").textContent = seiz.length ? (inside >= 0 ? `crise ${inside + 1} / ${seiz.length}` : `${seiz.length} crise${seiz.length > 1 ? "s" : ""}`) : "aucune crise";
+  drawWindowPanel();
+}
+function drawOverviewStrip() {
+  const r = S.rec, rec = META.recordings[r], w8 = W();
+  const cv = $("#overview"); const { ctx, w, h } = setupCanvas(cv);
+  const X = (t) => (t / rec.duration) * w;
+  ctx.fillStyle = css("--grid"); ctx.fillRect(0, 0, w, h);
+  rec.seizures.forEach(([a, b]) => { ctx.fillStyle = css("--crisis"); ctx.fillRect(X(a), 0, Math.max(2, X(b) - X(a)), h); });
+  // enveloppe RMS (log)
+  const rms = w8.features.RMS; const lo = Math.log10(5), hi = Math.log10(400);
+  ctx.beginPath(); ctx.strokeStyle = css("--ink-2"); ctx.lineWidth = 1;
+  for (let s = 0; s < rec.windows; s++) { const v = (clamp(Math.log10(rms[rec.offset + s] || 1e-3), lo, hi) - lo) / (hi - lo); const x = X(s + 1), y = h - 4 - v * (h * 0.55); s ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.stroke();
+  // probabilite du modele
+  const p = w8.proba[S.model];
+  for (let s = 0; s < rec.windows; s++) { const v = p[rec.offset + s]; if (v < S.thr) continue; ctx.fillStyle = css("--accent"); ctx.fillRect(X(s), 0, Math.max(1, X(2) - X(0)) / 2, 10); }
+  ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.5; ctx.strokeRect(X(S.t0) + 0.75, 0.75, X(S.span) - 1.5, h - 1.5);
+  axisText(ctx, 10); ctx.fillText("modèle", 4, 20); ctx.fillText("RMS", 4, h - 6);
+}
+function drawWindowPanel() {
+  const w8 = W(); let gi = S.sel;
+  if (gi === null || w8.recording[gi] !== S.rec) { gi = windowIndex(S.rec, S.t0 + S.span / 2 - 1); }
+  const r = w8.recording[gi], rec = META.recordings[r], start = w8.start[gi], cls = w8.cls[gi];
+  $("#win-title").textContent = `Fenêtre ${start + 1} · ${fmtTime(start)}–${fmtTime(start + 2)}`;
+  $("#win-truth").innerHTML = cls ? `<span class="chip crisis">Crise annotée</span>` : `<span class="chip calm">Hors crise</span>`;
+  $("#win-sub").textContent = `${rec.label} · ${Math.round(w8.frac[gi] * 100)} % des échantillons en crise${w8.test[gi] ? " · fenêtre du jeu de test 80/20" : ""}`;
+  $("#win-probs").innerHTML = `<div class="label" style="margin-bottom:2px">Probabilité de crise, par modèle</div>` + META.models.map((m) => {
+    const p = w8.proba[m][gi], ok = (p >= S.thr) === (cls === 1);
+    return `<div class="prob-row"><span>${SHORT[m]}</span><span class="prob-bar"><i style="width:${p * 100}%;background:${modelColor(m)}"></i><b style="left:${S.thr * 100}%"></b></span><span class="mono" style="color:${ok ? "var(--good)" : "var(--crisis)"}">${fr(p, 2)}</span></div>`;
+  }).join("") + `<p class="small muted" style="margin-top:8px">Trait noir : seuil ${fr(S.thr, 2)}. Valeur verte : bonne décision, orange : erreur.</p>`;
+  // signal de la fenetre (19 voies)
+  const rate = RATE(), i0 = start * rate, n = 2 * rate;
+  const seg = META.signal.channels.map((_, c) => samples(r, c, i0, i0 + n));
+  drawScalp(seg); drawSpectrum(seg); drawFeatDots(gi);
+}
+function seqColor(v) { // v dans [0,1] -> rampe sequentielle
+  const stops = ["--seq-0", "--seq-1", "--seq-2", "--seq-3", "--seq-4"].map(css).map(hexRgb);
+  const t = clamp(v, 0, 1) * (stops.length - 1), k = Math.min(stops.length - 2, Math.floor(t)), f = t - k;
+  const c = stops[k].map((a, i) => Math.round(a + (stops[k + 1][i] - a) * f)); return `rgb(${c.join(",")})`;
+}
+function hexRgb(hx) { hx = hx.replace("#", ""); if (hx.length === 3) hx = hx.split("").map((c) => c + c).join(""); return [0, 2, 4].map((i) => parseInt(hx.slice(i, i + 2), 16)); }
+function drawScalp(seg) {
+  const cv = $("#scalp"); const { ctx, w, h } = setupCanvas(cv);
+  const R = Math.min(w * 0.36, h * 0.42), cx = w * 0.42, cy = h / 2 + 4;
+  ctx.strokeStyle = css("--grid-strong"); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx - R * 0.12, cy - R * 0.99); ctx.lineTo(cx, cy - R * 1.13); ctx.lineTo(cx + R * 0.12, cy - R * 0.99); ctx.stroke();
+  const lo = Math.log10(5), hi = Math.log10(250);
+  META.signal.channels.forEach((name, c) => {
+    const pos = SCALP[name]; if (!pos) return; const d = seg[c]; let sd = null;
+    if (d) { let m = 0; for (const v of d) m += v; m /= d.length; let s2 = 0; for (const v of d) s2 += (v - m) ** 2; sd = Math.sqrt(s2 / d.length); }
+    const x = cx + pos[0] * R * 0.92, y = cy + pos[1] * R * 0.92;
+    ctx.beginPath(); ctx.arc(x, y, R * 0.13, 0, Math.PI * 2);
+    ctx.fillStyle = sd === null ? css("--grid") : seqColor((Math.log10(Math.max(sd, 1)) - lo) / (hi - lo)); ctx.fill();
+    ctx.strokeStyle = css("--panel"); ctx.lineWidth = 2; ctx.stroke();
+    ctx.font = `600 9px "IBM Plex Mono", monospace`; ctx.textAlign = "center";
+    const v = sd === null ? 0 : (Math.log10(Math.max(sd, 1)) - lo) / (hi - lo);
+    ctx.fillStyle = v > 0.55 ? (isDark() ? "#2a1b14" : "#ffffff") : css("--ink"); ctx.fillText(name, x, y + 3);
+  });
+  ctx.textAlign = "left";
+  // legende
+  const lx = w * 0.84, ly0 = cy - R * 0.8, ly1 = cy + R * 0.8;
+  for (let i = 0; i <= 40; i++) { ctx.fillStyle = seqColor(1 - i / 40); ctx.fillRect(lx, ly0 + ((ly1 - ly0) * i) / 40, 10, (ly1 - ly0) / 40 + 1); }
+  axisText(ctx, 10); ctx.fillText("250 µV", lx + 14, ly0 + 8); ctx.fillText("35", lx + 14, (ly0 + ly1) / 2 + 3); ctx.fillText("5 µV", lx + 14, ly1);
+}
+function isDark() { const t = document.documentElement.getAttribute("data-theme"); return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; }
+/* FFT radix-2 */
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (-2 * Math.PI) / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) { let cr = 1, ci = 0; for (let j = 0; j < len / 2; j++) {
+      const ur = re[i + j], ui = im[i + j], vr = re[i + j + len / 2] * cr - im[i + j + len / 2] * ci, vi = re[i + j + len / 2] * ci + im[i + j + len / 2] * cr;
+      re[i + j] = ur + vr; im[i + j] = ui + vi; re[i + j + len / 2] = ur - vr; im[i + j + len / 2] = ui - vi;
+      const nr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = nr; } }
+  }
+}
+function psdOf(d, rate) {
+  const n = d.length; let m = 0; for (const v of d) m += v; m /= n;
+  const re = new Float64Array(n), im = new Float64Array(n); let wsum = 0;
+  for (let i = 0; i < n; i++) { const wv = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1)); wsum += wv * wv; re[i] = (d[i] - m) * wv; }
+  fft(re, im); const out = new Float64Array(n / 2 + 1);
+  for (let k = 0; k <= n / 2; k++) out[k] = ((re[k] ** 2 + im[k] ** 2) / (rate * wsum)) * (k > 0 && k < n / 2 ? 2 : 1);
+  return out;
+}
+function drawSpectrum(seg) {
+  const cv = $("#spectrum"); const { ctx, w, h } = setupCanvas(cv);
+  const rate = RATE(); if (seg.some((d) => !d)) { axisText(ctx); ctx.fillText("chargement…", 10, 20); return; }
+  const psds = seg.map((d) => psdOf(d, rate)); const nf = psds[0].length, df = rate / 256;
+  const med = new Float64Array(nf); for (let k = 0; k < nf; k++) { const col = psds.map((p) => p[k]).sort((a, b) => a - b); med[k] = col[Math.floor(col.length / 2)]; }
+  const fmax = 32, L = 38, B = 22, T = 16, pw = w - L - 8, ph = h - B - T;
+  const kmax = Math.round(fmax / df); const lo = -1, hi = Math.max(2, Math.ceil(Math.log10(Math.max(...med.slice(1, kmax)))));
+  const X = (f) => L + (f / fmax) * pw, Y = (v) => T + ph - ((Math.log10(Math.max(v, 10 ** lo)) - lo) / (hi - lo)) * ph;
+  const bandCols = ["--seq-1", "--seq-0", "--seq-1", "--seq-0"];
+  Object.entries(META.bands).forEach(([name, [a, b]], i) => { ctx.fillStyle = css(bandCols[i]); ctx.globalAlpha = 0.5; ctx.fillRect(X(a), T, X(Math.min(b, fmax)) - X(a), ph); ctx.globalAlpha = 1; axisText(ctx, 9); ctx.textAlign = "center"; ctx.fillText(name, (X(a) + X(Math.min(b, fmax))) / 2, T - 4); });
+  ctx.textAlign = "left";
+  for (let e = lo; e <= hi; e++) { ctx.strokeStyle = css("--grid"); ctx.beginPath(); ctx.moveTo(L, Y(10 ** e)); ctx.lineTo(L + pw, Y(10 ** e)); ctx.stroke(); axisText(ctx, 9); ctx.textAlign = "right"; ctx.fillText(`10${supNum(e)}`, L - 4, Y(10 ** e) + 3); }
+  ctx.textAlign = "center"; [0, 4, 8, 13, 20, 30].forEach((f) => ctx.fillText(f, X(f), h - 6)); ctx.textAlign = "left";
+  const cls = W().cls[S.sel ?? 0]; ctx.strokeStyle = css("--trace"); ctx.lineWidth = 1.8; ctx.beginPath();
+  for (let k = 1; k <= kmax; k++) { const x = X(k * df), y = Y(med[k]); k > 1 ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke();
+  let kp = 1; for (let k = 2; k <= kmax; k++) if (med[k] > med[kp]) kp = k;
+  ctx.fillStyle = css("--crisis"); ctx.beginPath(); ctx.arc(X(kp * df), Y(med[kp]), 3.5, 0, Math.PI * 2); ctx.fill();
+  axisText(ctx, 10); ctx.fillStyle = css("--ink"); ctx.fillText(`pic ${fr(kp * df, 1)} Hz`, Math.min(X(kp * df) + 6, w - 70), Y(med[kp]) + 4);
+  axisText(ctx, 9); ctx.fillText("µV²/Hz", 2, 10); ctx.textAlign = "right"; ctx.fillText("Hz", w - 4, h - 6); ctx.textAlign = "left";
+}
+function drawFeatDots(gi) {
+  const cv = $("#featdots"); const { ctx, w, h } = setupCanvas(cv);
+  const feats = META.features, L = 72, R = 10, T = 8, row = (h - T - 18) / feats.length;
+  feats.forEach((f, i) => {
+    const c = META.comparison[f], v = W().features[f][gi], y = T + row * (i + 0.5);
+    const signed = f === "Mean" || f === "Min";
+    let vals = [c.median0, c.median1, v]; let tr;
+    if (signed) { const m = Math.max(...vals.map(Math.abs), 1) * 1.15; tr = (x) => L + ((x + m) / (2 * m)) * (w - L - R); }
+    else { const lo = Math.log10(Math.min(...vals.filter((x) => x > 0)) / 3), hi = Math.log10(Math.max(...vals) * 3); tr = (x) => L + ((Math.log10(Math.max(x, 1e-9)) - lo) / (hi - lo)) * (w - L - R); }
+    ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - R, y); ctx.stroke();
+    [[c.median0, "--calm"], [c.median1, "--crisis"]].forEach(([m, col]) => { ctx.fillStyle = css(col); ctx.fillRect(tr(m) - 1.5, y - 7, 3, 14); });
+    const x = tr(v); ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x + 6, y); ctx.lineTo(x, y + 6); ctx.lineTo(x - 6, y); ctx.closePath(); ctx.fill();
+    ctx.font = `500 11px "IBM Plex Sans", sans-serif`; ctx.fillStyle = css("--ink-2"); ctx.fillText(f, 0, y + 4);
+  });
+  axisText(ctx, 10); ctx.fillStyle = css("--calm"); ctx.fillText("▮ médiane hors crise", L, h - 4); ctx.fillStyle = css("--crisis"); ctx.fillText("▮ médiane en crise", L + 130, h - 4);
+}
+
+/* =====================================================================
+   MODELES
+   ===================================================================== */
+let labCache = null;
+function buildModels() {
+  segment($("#bench-seg"), (v) => { S.bench = v; renderBench(); });
+  $("#lab-models").innerHTML = META.models.map((m) => `<button type="button" data-m="${m}" aria-pressed="${m === S.labModel}"><span class="swatch" style="background:${modelColor(m)}"></span>${SHORT[m]}</button>`).join("");
+  $("#lab-models").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; S.labModel = b.dataset.m; $$("#lab-models button").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); labCache = null; scheduleDraw(); });
+  $("#lab-thr").addEventListener("input", (e) => { S.labThr = +e.target.value; scheduleDraw(); });
+  $("#thr-default").addEventListener("click", () => { S.labThr = 0.5; $("#lab-thr").value = 0.5; scheduleDraw(); });
+  $("#thr-best").addEventListener("click", () => { const c = labCurves(); S.labThr = c.bestThr; $("#lab-thr").value = c.bestThr; scheduleDraw(); });
+  renderBench(); renderConfusions();
+  const pc = $("#patients");
+  pc.addEventListener("click", (e) => { const rect = pc.getBoundingClientRect(); const n = META.recordings.length; const k = Math.floor(((e.clientX - rect.left - 36) / (rect.width - 44)) * n); if (k >= 0 && k < n) { const s = META.recordings[patientOrder[k]].seizures[0]; S.model = S.labModel; $("#tr-model").value = S.labModel; S.thr = S.labThr; $("#thr").value = S.labThr; $("#thr-val").textContent = fr(S.thr, 2); openTrace(patientOrder[k], s ? s[0] : 0); } });
+  pc.addEventListener("mousemove", (e) => { const rect = pc.getBoundingClientRect(); const n = META.recordings.length; const k = Math.floor(((e.clientX - rect.left - 36) / (rect.width - 44)) * n); if (k >= 0 && k < n && patientCache) { const o = patientCache[patientOrder[k]]; const rec = META.recordings[patientOrder[k]]; showTip(`<b>${rec.label}</b><br>F1 ${fr(o.f1, 2)} · ${o.tp} crises détectées / ${o.tp + o.fn}<br>${o.fp} fausses alarmes`, e.clientX, e.clientY); } else hideTip(); });
+  pc.addEventListener("mouseleave", hideTip);
+}
+function renderBench() {
+  const src = S.bench === "test" ? META.results.test : META.results.group;
+  const names = Object.keys(src).sort((a, b) => src[b]["F1-score"] - src[a]["F1-score"]);
+  const ref = META.results.test["Reference : toujours 0"];
+  const rows = [...names.filter((n) => !n.startsWith("Ref"))];
+  const best = rows[0];
+  const cell = (v, col) => `<div class="cell-bar"><span>${fr(v, 3)}</span><i><u style="width:${v * 100}%;background:${col}"></u></i></div>`;
+  const cv = META.results.cv;
+  let html = `<thead><tr><th>Modèle</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1-score</th><th>F1 validation croisée</th><th>Hyperparamètres retenus</th></tr></thead><tbody>`;
+  rows.forEach((n) => { const m = src[n], col = modelColor(n);
+    html += `<tr class="${n === best ? "best" : ""}"><td class="m"><span class="swatch" style="background:${col}"></span> ${n}${n === "Gradient Boosting" ? ' <span class="chip">ajouté</span>' : ""}</td><td>${cell(m.Accuracy, "var(--ink-3)")}</td><td>${cell(m.Precision, col)}</td><td>${cell(m.Recall, col)}</td><td>${cell(m["F1-score"], col)}</td><td class="mono">${fr(cv[n].f1, 3)} ± ${fr(cv[n].std, 3)}</td><td class="small mono" style="white-space:normal;min-width:220px">${Object.entries(cv[n].params).map(([k, v]) => `${k}=${v}`).join(", ")}</td></tr>`; });
+  if (S.bench === "test") html += `<tr class="ref"><td class="m">Référence : toujours « pas de crise »</td><td>${cell(ref.Accuracy, "var(--ink-3)")}</td><td>${cell(0, "")}</td><td>${cell(0, "")}</td><td>${cell(0, "")}</td><td></td><td class="small">aucun apprentissage</td></tr>`;
+  $("#bench").innerHTML = html + "</tbody>";
+  $("#bench-note").innerHTML = S.bench === "test"
+    ? `Résultats de la Question 12 : 5 799 fenêtres de test tirées au hasard (20 %). L'accuracy ne départage rien : la référence qui ne détecte <b>aucune</b> crise a déjà ${fr(ref.Accuracy * 100, 1)} %.`
+    : `Chaque enregistrement est testé par un modèle entraîné sans lui (5 plis par patient). C'est la performance attendue sur un <b>nouveau patient</b> : plus basse, car deux fenêtres voisines ne peuvent plus être l'une en entraînement et l'autre en test.`;
+}
+function renderConfusions() {
+  const cm = META.results.confusion;
+  $("#cm-grid").innerHTML = Object.entries(cm).map(([n, c]) => {
+    const tp = c["VP (crise detectee)"], fn = c["FN (crise manquee)"], fp = c["FP (fausse alarme)"], tn = c["VN"];
+    const cell = (v, tot, good) => `<div style="background:${good ? "var(--accent-soft)" : "var(--grid)"};${v / tot > 0.5 && good ? "font-weight:700" : ""}">${frInt(v)}<br><span class="muted" style="font-size:10px">${Math.round((v / tot) * 100)} %</span></div>`;
+    return `<div class="cm-mini"><h4><span class="swatch" style="background:${modelColor(n)}"></span> ${SHORT[n] || "Toujours 0"}</h4><div class="g">${cell(tn, tn + fp, true)}${cell(fp, tn + fp, false)}${cell(fn, fn + tp, false)}${cell(tp, fn + tp, true)}</div></div>`;
+  }).join("");
+}
+function labCurves() {
+  if (labCache && labCache.model === S.labModel) return labCache;
+  const p = W().proba[S.labModel], y = W().cls, B = 1000, pos = new Float64Array(B + 1), neg = new Float64Array(B + 1);
+  for (let i = 0; i < p.length; i++) (y[i] ? pos : neg)[Math.round(p[i] * B)]++;
+  const P = pos.reduce((a, b) => a + b, 0), N = neg.reduce((a, b) => a + b, 0);
+  const cumPos = new Float64Array(B + 2), cumNeg = new Float64Array(B + 2); // nombre >= seuil
+  for (let k = B; k >= 0; k--) { cumPos[k] = cumPos[k + 1] + pos[k]; cumNeg[k] = cumNeg[k + 1] + neg[k]; }
+  const at = (thr) => { const k = clamp(Math.ceil(thr * B - 1e-9), 0, B); const tp = cumPos[k], fp = cumNeg[k], fn = P - tp, tn = N - fp; const pr = tp + fp ? tp / (tp + fp) : 1, rc = tp / P; return { tp, fp, fn, tn, pr, rc, f1: tp ? (2 * tp) / (2 * tp + fp + fn) : 0, acc: (tp + tn) / (P + N) }; };
+  let bestThr = 0.5, bestF1 = -1; const pts = [];
+  for (let t = 0.01; t <= 0.99; t += 0.01) { const m = at(t); pts.push({ t, ...m }); if (m.f1 > bestF1) { bestF1 = m.f1; bestThr = +t.toFixed(2); } }
+  labCache = { model: S.labModel, at, pts, bestThr, bestF1, P, N };
+  return labCache;
+}
+function eventStats(model, thr) {
+  const w8 = W(), p = w8.proba[model]; let detected = 0, total = 0, falseAlarms = 0;
+  META.recordings.forEach((rec) => {
+    const segs = []; let cur = null;
+    for (let s = 0; s < rec.windows; s++) { if (p[rec.offset + s] >= thr) { if (cur && s <= cur[1]) cur[1] = s + 2; else { cur = [s, s + 2]; segs.push(cur); } } }
+    rec.seizures.forEach(([a, b]) => { total++; if (segs.some(([x, y]) => x < b && y > a)) detected++; });
+    segs.forEach(([x, y]) => { if (!rec.seizures.some(([a, b]) => x < b && y > a)) falseAlarms++; });
+  });
+  return { detected, total, falseAlarms };
+}
+let patientCache = null, patientOrder = [];
+function drawModels() {
+  const c = labCurves(), m = c.at(S.labThr), col = modelColor(S.labModel);
+  $("#lab-thr-val").textContent = fr(S.labThr, 2);
+  $("#lab-metrics").innerHTML = [["Precision", m.pr], ["Recall", m.rc], ["F1-score", m.f1], ["Accuracy", m.acc]].map(([k, v]) => `<div><b>${fr(v, 3)}</b><span>${k}</span></div>`).join("");
+  const cell = (v, tot, good, lab) => `<div style="background:${good ? "var(--accent-soft)" : "var(--grid)"}"><span class="v">${frInt(v)}<small>${lab} · ${fr((v / tot) * 100, 1)} %</small></span></div>`;
+  $("#lab-cm").innerHTML = `<div class="h"></div><div class="h">prédit hors crise</div><div class="h">prédit crise</div>
+    <div class="h" style="writing-mode:vertical-rl;transform:rotate(180deg)">réel 0</div>${cell(m.tn, m.tn + m.fp, true, "VN")}${cell(m.fp, m.tn + m.fp, false, "fausses alarmes")}
+    <div class="h" style="writing-mode:vertical-rl;transform:rotate(180deg)">réel 1</div>${cell(m.fn, m.fn + m.tp, false, "crises manquées")}${cell(m.tp, m.fn + m.tp, true, "VP")}`;
+  const ev = eventStats(S.labModel, S.labThr);
+  $("#lab-events").innerHTML = `<div><b>${ev.detected} / ${ev.total}</b><span>crises touchées<br>(au moins 1 fenêtre)</span></div><div><b>${ev.falseAlarms}</b><span>épisodes de fausse alarme<br>(sur ${fr(META.recordings.reduce((a, r) => a + r.duration, 0) / 3600, 1)} h)</span></div>`;
+  drawPR(c, m, col); drawF1Curve(c, col); drawPatients(col);
+}
+function chartFrame(ctx, w, h, L, B, T, R, xr, yr, xl, yl, xt, yt) {
+  const pw = w - L - R, ph = h - T - B;
+  const X = (v) => L + ((v - xr[0]) / (xr[1] - xr[0])) * pw, Y = (v) => T + ph - ((v - yr[0]) / (yr[1] - yr[0])) * ph;
+  axisText(ctx, 10);
+  (yt || niceTicks(yr[0], yr[1], 5)).forEach((v) => { ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(L + pw, Y(v)); ctx.stroke(); ctx.textAlign = "right"; ctx.fillText(fr(v, v % 1 ? 1 : 0), L - 5, Y(v) + 3); });
+  (xt || niceTicks(xr[0], xr[1], 5)).forEach((v) => { ctx.textAlign = "center"; ctx.fillText(typeof v === "number" ? fr(v, v % 1 ? 1 : 0) : v, X(v), T + ph + 14); });
+  ctx.textAlign = "left"; if (yl) { ctx.save(); ctx.translate(10, T + ph / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = "center"; ctx.fillText(yl, 0, 0); ctx.restore(); }
+  if (xl) { ctx.textAlign = "center"; ctx.fillText(xl, L + pw / 2, h - 2); ctx.textAlign = "left"; }
+  return { X, Y, pw, ph };
+}
+function drawPR(c, m, col) {
+  const cv = $("#pr"); const { ctx, w, h } = setupCanvas(cv);
+  const { X, Y } = chartFrame(ctx, w, h, 40, 30, 10, 10, [0, 1], [0, 1], "Recall (crises détectées)", "Precision");
+  // iso-F1
+  [0.6, 0.7, 0.8, 0.9].forEach((f) => { ctx.strokeStyle = css("--grid-strong"); ctx.setLineDash([2, 3]); ctx.beginPath(); let first = true; for (let r = f / (2 - f) + 0.001; r <= 1; r += 0.01) { const p = (f * r) / (2 * r - f); if (p > 1 || p < 0) continue; first ? ctx.moveTo(X(r), Y(p)) : ctx.lineTo(X(r), Y(p)); first = false; } ctx.stroke(); ctx.setLineDash([]); axisText(ctx, 9); ctx.fillText(`F1 ${fr(f, 1)}`, X(0.97) - 30, Y((f * 0.97) / (2 * 0.97 - f)) - 3); });
+  ctx.strokeStyle = col; ctx.lineWidth = 2.2; ctx.beginPath(); c.pts.forEach((p, i) => (i ? ctx.lineTo(X(p.rc), Y(p.pr)) : ctx.moveTo(X(p.rc), Y(p.pr)))); ctx.stroke();
+  ctx.fillStyle = css("--panel"); ctx.strokeStyle = css("--ink"); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(m.rc), Y(m.pr), 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  axisText(ctx, 11); ctx.fillStyle = css("--ink"); ctx.fillText(`seuil ${fr(S.labThr, 2)}`, clamp(X(m.rc) - 70, 44, w - 90), Y(m.pr) + 20);
+}
+function drawF1Curve(c, col) {
+  const cv = $("#f1curve"); const { ctx, w, h } = setupCanvas(cv);
+  const { X, Y, ph } = chartFrame(ctx, w, h, 40, 30, 10, 10, [0, 1], [0, 1], "Seuil de décision", "");
+  const series = [["pr", "Precision", css("--ink-3"), [4, 3]], ["rc", "Recall", css("--ink-2"), [1, 3]], ["f1", "F1", col, []]];
+  series.forEach(([k, lab, cc, dash]) => { ctx.strokeStyle = cc; ctx.lineWidth = k === "f1" ? 2.4 : 1.6; ctx.setLineDash(dash); ctx.beginPath(); c.pts.forEach((p, i) => (i ? ctx.lineTo(X(p.t), Y(p[k])) : ctx.moveTo(X(p.t), Y(p[k])))); ctx.stroke(); ctx.setLineDash([]); const ref = c.pts[k === "pr" ? 4 : k === "rc" ? 9 : 14]; axisText(ctx, 10); ctx.fillStyle = cc; ctx.fillText(lab, X(ref.t) + 4, Y(ref[k]) + (k === "rc" ? 14 : -6)); });
+  ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(X(S.labThr), 10); ctx.lineTo(X(S.labThr), 10 + ph); ctx.stroke();
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(c.bestThr), Y(c.bestF1), 4, 0, Math.PI * 2); ctx.fill();
+  axisText(ctx, 10); ctx.fillStyle = css("--ink"); ctx.fillText(`F1 max ${fr(c.bestF1, 3)} à ${fr(c.bestThr, 2)}`, clamp(X(c.bestThr) + 8, 44, w - 140), Y(c.bestF1) - 8);
+}
+function drawPatients(col) {
+  const cv = $("#patients"); const { ctx, w, h } = setupCanvas(cv);
+  patientCache = patientStats(S.labModel, S.labThr);
+  patientOrder = META.recordings.map((_, i) => i).sort((a, b) => patientCache[b].f1 - patientCache[a].f1);
+  const n = patientOrder.length, L = 36, R = 8, T = 8, B = 46, pw = w - L - R, ph = h - T - B, bw = pw / n;
+  const Y = (v) => T + ph - v * ph;
+  [0, 0.25, 0.5, 0.75, 1].forEach((v) => { ctx.strokeStyle = css("--grid"); ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(L + pw, Y(v)); ctx.stroke(); axisText(ctx, 10); ctx.textAlign = "right"; ctx.fillText(fr(v, 2), L - 4, Y(v) + 3); });
+  patientOrder.forEach((r, k) => {
+    const o = patientCache[r], x = L + k * bw;
+    ctx.fillStyle = col; ctx.fillRect(x + 2, Y(o.f1), bw - 4, ph - (Y(o.f1) - T));
+    ctx.save(); ctx.translate(x + bw / 2 + 3, T + ph + 6); ctx.rotate(-Math.PI / 4); axisText(ctx, 9); ctx.textAlign = "right"; ctx.fillText(META.recordings[r].label, 0, 0); ctx.restore();
+  });
+  ctx.textAlign = "left";
+}
+
+/* =====================================================================
+   ARBRES
+   ===================================================================== */
+function buildTrees() {
+  $("#tree-depth").max = Math.max(META.trees.gini.depth, META.trees.entropy.depth);
+  $("#tree-depth").addEventListener("input", (e) => { S.treeDepth = +e.target.value; $("#depth-val").textContent = S.treeDepth; renderTrees(); });
+  const pick = (cls) => { const w8 = W(); const idx = []; for (let i = 0; i < w8.cls.length; i++) if (w8.cls[i] === cls && w8.test[i]) idx.push(i); S.follow = idx[Math.floor(Math.random() * idx.length)]; renderTrees(); };
+  $("#random-crisis").addEventListener("click", () => pick(1));
+  $("#random-calm").addEventListener("click", () => pick(0));
+  // comparaison
+  const t = META.trees, cv = META.results.cv, te = META.results.test, w8 = W();
+  const pred = (tree, leaf) => (tree.value[leaf][1] > tree.value[leaf][0] ? 1 : 0);
+  let same = 0, n = 0; for (let i = 0; i < w8.cls.length; i++) if (w8.test[i]) { n++; if (pred(t.gini, w8.leaf.gini[i]) === pred(t.entropy, w8.leaf.entropy[i])) same++; }
+  const G = "Decision Tree (Gini)", E = "Decision Tree (Entropie)";
+  const rows = [
+    ["F1 sur le test", fr(te[G]["F1-score"], 3), fr(te[E]["F1-score"], 3)],
+    ["Precision / Recall (test)", `${fr(te[G].Precision, 2)} / ${fr(te[G].Recall, 2)}`, `${fr(te[E].Precision, 2)} / ${fr(te[E].Recall, 2)}`],
+    ["F1 validation croisée (5 plis)", `${fr(cv[G].f1, 3)} ± ${fr(cv[G].std, 3)}`, `${fr(cv[E].f1, 3)} ± ${fr(cv[E].std, 3)}`],
+    ["F1 sur un nouveau patient", fr(META.results.group[G]["F1-score"], 3), fr(META.results.group[E]["F1-score"], 3)],
+    ["Profondeur · feuilles", `${t.gini.depth} · ${t.gini.leaves}`, `${t.entropy.depth} · ${t.entropy.leaves}`],
+    ["Temps d'entraînement", `${Math.round(cv[G].fit_s * 1000)} ms`, `${Math.round(cv[E].fit_s * 1000)} ms`],
+    ["Même décision sur le test", `${fr((same / n) * 100, 1)} % des ${frInt(n)} fenêtres`, ""],
+  ];
+  $("#tree-cmp").innerHTML = `<thead><tr><th></th><th style="color:var(--m5)">Gini</th><th style="color:var(--m6)">Entropie</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${r[0]}</td><td class="mono">${r[1]}</td><td class="mono">${r[2]}</td></tr>`).join("")}</tbody>
+    <tfoot><tr><td colspan="3" style="text-align:left;padding-top:10px"><b>Verdict :</b> même qualité (les écarts sont plus petits que la variation entre plis), mais l'arbre Gini est deux fois plus petit. On retient <b>Gini</b>.</td></tr></tfoot>`;
+  renderTrees();
+}
+function treePath(tree, leaf) {
+  const parent = new Int32Array(tree.left.length).fill(-1);
+  tree.left.forEach((c, i) => { if (c >= 0) parent[c] = i; }); tree.right.forEach((c, i) => { if (c >= 0) parent[c] = i; });
+  const path = []; let n = leaf; while (n >= 0) { path.unshift(n); n = parent[n]; } return path;
+}
+function renderTrees() {
+  const w8 = W();
+  if (S.follow !== null) {
+    const gi = S.follow, rec = META.recordings[w8.recording[gi]];
+    $("#tree-follow").innerHTML = `Fenêtre suivie : <b>${rec.label}</b> à ${fmtTime(w8.start[gi])}, ${w8.cls[gi] ? '<span class="chip crisis">crise annotée</span>' : '<span class="chip calm">hors crise</span>'} <a href="#trace" id="follow-open">voir dans le tracé</a>`;
+    $("#follow-open").addEventListener("click", (e) => { e.preventDefault(); openTrace(w8.recording[gi], w8.start[gi] + 1); });
+  } else $("#tree-follow").textContent = "Choisissez une fenêtre (bouton ci-dessus, ou un clic dans le tracé) pour suivre son chemin dans les deux arbres.";
+  [["gini", "--m5"], ["entropy", "--m6"]].forEach(([k, colv]) => {
+    const tree = META.trees[k], path = S.follow !== null ? treePath(tree, w8.leaf[k][S.follow]) : [];
+    const box = $(`#tree-${k}`);
+    box.innerHTML = treeSvg(tree, S.treeDepth, new Set(path), css(colv), k === "gini" ? "Gini" : "Entropie");
+    const rootX = +box.querySelector("svg").dataset.root; box.scrollLeft = Math.max(0, rootX - box.clientWidth / 2);
+    const ul = $(`#path-${k}`);
+    if (!path.length) { ul.innerHTML = ""; return; }
+    const feats = w8.features;
+    ul.innerHTML = path.map((nd, i) => {
+      if (tree.left[nd] < 0) { const v = tree.value[nd], p = v[1] / (v[0] + v[1]); const dec = p > 0.5; return `<li class="leaf">→ feuille : ${frInt(v[0] + v[1])} fenêtres, ${fr(p * 100, 0)} % de crises ⇒ <span style="color:${dec ? "var(--crisis)" : "var(--calm)"}">${dec ? "CRISE" : "hors crise"}</span> ${dec === (w8.cls[S.follow] === 1) ? '<span class="chip ok">correct</span>' : '<span class="chip bad">erreur</span>'}</li>`; }
+      const f = tree.feature[nd], th = tree.threshold[nd], v = feats[f][S.follow], goLeft = path[i + 1] === tree.left[nd];
+      return `<li><span>${i + 1}.</span><span>${f} ≤ ${fmtNum(th)} ?</span><span class="ans">${f} = ${fmtNum(v)} → ${goLeft ? "oui" : "non"}</span></li>`;
+    }).join("");
+  });
+}
+function fmtNum(v) { const a = Math.abs(v); if (a >= 1e5) { const e = Math.floor(Math.log10(a)); return `${fr(v / 10 ** e, 2)}·10${supNum(e)}`; } return fr(v, a >= 100 ? 0 : a >= 10 ? 1 : 2); }
+function treeSvg(tree, maxDepth, onPath, color, label) {
+  // disposition : feuilles visibles reparties en x, parents au centre de leurs enfants
+  const NW = 170, NH = 62, GX = 14, GY = 46; let next = 0; const pos = {};
+  const visit = (n, d) => {
+    const leaf = tree.left[n] < 0 || d >= maxDepth;
+    if (leaf) { pos[n] = { x: next * (NW + GX), d, leaf: true, cut: tree.left[n] >= 0 }; next++; return; }
+    visit(tree.left[n], d + 1); visit(tree.right[n], d + 1);
+    pos[n] = { x: (pos[tree.left[n]].x + pos[tree.right[n]].x) / 2, d, leaf: false };
+  };
+  visit(0, 0);
+  const W0 = next * (NW + GX) - GX + 20, H0 = (Math.max(...Object.values(pos).map((p) => p.d)) + 1) * (NH + GY) - GY + 20;
+  let edges = "", nodes = "";
+  Object.entries(pos).forEach(([n, p]) => {
+    n = +n; const x = p.x + 10, y = p.d * (NH + GY) + 10;
+    if (!p.leaf) [tree.left[n], tree.right[n]].forEach((c, j) => { const q = pos[c]; const on = onPath.has(n) && onPath.has(c); edges += `<path d="M${x + NW / 2},${y + NH} C${x + NW / 2},${y + NH + GY / 2} ${q.x + 10 + NW / 2},${y + NH + GY / 2} ${q.x + 10 + NW / 2},${y + NH + GY}" fill="none" stroke="${on ? color : "var(--grid-strong)"}" stroke-width="${on ? 3 : 1.2}"/><text x="${(x + q.x + 10 + NW) / 2 + (j ? 8 : -8)}" y="${y + NH + GY / 2 - 2}" font-size="10" fill="var(--ink-3)" text-anchor="middle" font-family="IBM Plex Mono, monospace">${j ? "non" : "oui"}</text>`; });
+    const v = tree.value[n], tot = v[0] + v[1], share = v[1] / tot, on = onPath.has(n);
+    const title = tree.left[n] < 0 ? (share > 0.5 ? "feuille : CRISE" : "feuille : hors crise") : p.cut ? `${tree.feature[n]} ≤ ${fmtNum(tree.threshold[n])} …` : `${tree.feature[n]} ≤ ${fmtNum(tree.threshold[n])}`;
+    nodes += `<g><rect x="${x}" y="${y}" width="${NW}" height="${NH}" rx="5" fill="var(--panel)" stroke="${on ? color : "var(--rule)"}" stroke-width="${on ? 2.5 : 1}"/>
+      <text x="${x + 8}" y="${y + 17}" font-size="12" font-weight="600" fill="var(--ink)" font-family="IBM Plex Sans, sans-serif">${title}</text>
+      <text x="${x + 8}" y="${y + 33}" font-size="10.5" fill="var(--ink-2)" font-family="IBM Plex Mono, monospace">${label} ${fr(tree.impurity[n], 3)}</text>
+      <text x="${x + NW - 8}" y="${y + 33}" font-size="10.5" text-anchor="end" fill="var(--ink-3)" font-family="IBM Plex Mono, monospace">n=${frInt(tot)}</text>
+      <rect x="${x + 8}" y="${y + 43}" width="${NW - 58}" height="9" rx="2" fill="var(--calm)" opacity="0.5"/>
+      <rect x="${x + 8}" y="${y + 43}" width="${Math.max(share > 0 ? 1.5 : 0, (NW - 58) * share)}" height="9" rx="2" fill="var(--crisis)"/>
+      <text x="${x + NW - 8}" y="${y + 52}" font-size="10.5" text-anchor="end" fill="var(--crisis)" font-family="IBM Plex Mono, monospace">${fr(share * 100, share < 0.1 && share > 0 ? 1 : 0)} %</text></g>`;
+  });
+  return `<svg data-root="${pos[0].x + 10 + NW / 2}" width="${W0}" height="${H0}" viewBox="0 0 ${W0} ${H0}" role="img" aria-label="Arbre ${label}">${edges}${nodes}</svg>`;
+}
+function drawTrees() {
+  // impurete
+  { const cv = $("#impurity"); const { ctx, w, h } = setupCanvas(cv);
+    const { X, Y } = chartFrame(ctx, w, h, 36, 30, 10, 10, [0, 1], [0, 1], "p = part de crises dans le nœud", "");
+    const g = (p) => 1 - p * p - (1 - p) ** 2, e = (p) => (p <= 0 || p >= 1 ? 0 : -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p)));
+    [[g, "--m5", "Gini", [], 0.5, 16], [e, "--m6", "Entropie", [], 0.78, -8], [(p) => e(p) / 2, "--m6", "Entropie / 2", [4, 3], 0.3, -10]].forEach(([f, c, lab, dash, at, dy]) => { ctx.strokeStyle = css(c); ctx.lineWidth = 2; ctx.setLineDash(dash); ctx.beginPath(); for (let i = 0; i <= 200; i++) { const p = i / 200; i ? ctx.lineTo(X(p), Y(f(p))) : ctx.moveTo(X(p), Y(f(p))); } ctx.stroke(); ctx.setLineDash([]); axisText(ctx, 10); ctx.fillStyle = css(c); ctx.textAlign = "center"; ctx.fillText(lab, X(at), Y(f(at)) + dy); ctx.textAlign = "left"; });
+    const root = META.trees.gini.value[0], p0 = root[1] / (root[0] + root[1]);
+    ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.arc(X(p0), Y(g(p0)), 4, 0, Math.PI * 2); ctx.fill(); axisText(ctx, 10); ctx.fillStyle = css("--ink"); ctx.fillText(`racine : p = ${fr(p0, 3)}, Gini = ${fr(g(p0), 3)}`, X(p0) + 8, Y(g(p0)) + 14);
+  }
+  // profondeur
+  { const cv = $("#depthcurve"); const { ctx, w, h } = setupCanvas(cv);
+    const dc = META.results.depth_curve; const labels = [...new Set(dc.map((d) => d.max_depth))];
+    const L = 40, B = 30, T = 10, R = 10, pw = w - L - R, ph = h - T - B;
+    const X = (i) => L + (i / (labels.length - 1)) * pw, Y = (v) => T + ph - ((v - 0.5) / 0.52) * ph;
+    [0.5, 0.6, 0.7, 0.8, 0.9, 1].forEach((v) => { ctx.strokeStyle = css("--grid"); ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(L + pw, Y(v)); ctx.stroke(); axisText(ctx, 10); ctx.textAlign = "right"; ctx.fillText(fr(v, 1), L - 4, Y(v) + 3); });
+    labels.forEach((l, i) => { axisText(ctx, 10); ctx.textAlign = "center"; ctx.fillText(l, X(i), h - 14); }); ctx.fillText("profondeur maximale", L + pw / 2, h - 1); ctx.textAlign = "left";
+    [["gini", "--m5", "Gini"], ["entropy", "--m6", "Entropie"]].forEach(([k, c, lab]) => {
+      const rows = dc.filter((d) => d.criterion === k);
+      ["F1 entrainement", "F1 validation"].forEach((key) => { ctx.strokeStyle = css(c); ctx.lineWidth = key.includes("valid") ? 2.4 : 1.4; ctx.setLineDash(key.includes("valid") ? [] : [4, 3]); ctx.beginPath(); rows.forEach((d, i) => (i ? ctx.lineTo(X(i), Y(d[key])) : ctx.moveTo(X(i), Y(d[key])))); ctx.stroke(); ctx.setLineDash([]); });
+      rows.forEach((d, i) => { ctx.fillStyle = css(c); ctx.beginPath(); ctx.arc(X(i), Y(d["F1 validation"]), 3, 0, Math.PI * 2); ctx.fill(); });
+      const last = rows[rows.length - 1]; axisText(ctx, 10); ctx.fillStyle = css(c); ctx.fillText(`${lab}`, X(labels.length - 1) - 50, Y(last["F1 validation"]) + (k === "gini" ? -8 : 14));
+    });
+    cv.onmousemove = (e) => { const rect = cv.getBoundingClientRect(); const i = Math.round(((e.clientX - rect.left - L) / pw) * (labels.length - 1)); if (i < 0 || i >= labels.length) return hideTip(); const g = dc.find((d) => d.criterion === "gini" && d.max_depth === labels[i]), en = dc.find((d) => d.criterion === "entropy" && d.max_depth === labels[i]); showTip(`<b>Profondeur ${labels[i]}</b><br>Gini : validation ${fr(g["F1 validation"], 3)}, entraînement ${fr(g["F1 entrainement"], 3)}<br>Entropie : validation ${fr(en["F1 validation"], 3)}, entraînement ${fr(en["F1 entrainement"], 3)}`, e.clientX, e.clientY); };
+    cv.onmouseleave = hideTip;
+  }
+}
+
+/* =====================================================================
+   CARACTERISTIQUES
+   ===================================================================== */
+function buildFeatures() {
+  const opts = META.features.map((f) => `<option>${f}</option>`).join("");
+  $("#sx").innerHTML = opts; $("#sy").innerHTML = opts; $("#sx").value = S.sx; $("#sy").value = S.sy;
+  $("#sx").addEventListener("change", (e) => { S.sx = e.target.value; scheduleDraw(); });
+  $("#sy").addEventListener("change", (e) => { S.sy = e.target.value; scheduleDraw(); });
+  segment($("#scale-seg"), (v) => (S.scale = v));
+  segment($("#corr-seg"), (v) => (S.corr = v));
+  const sc = $("#scatter");
+  sc.addEventListener("mousemove", (e) => { const hit = scatterHit(e); if (hit === null) return hideTip(); const w8 = W(); const rec = META.recordings[w8.recording[hit]]; showTip(`<b>${rec.label}</b> · ${fmtTime(w8.start[hit])}<br>${w8.cls[hit] ? "crise annotée" : "hors crise"}<br>${S.sx} = ${fmtNum(w8.features[S.sx][hit])}<br>${S.sy} = ${fmtNum(w8.features[S.sy][hit])}`, e.clientX, e.clientY); });
+  sc.addEventListener("mouseleave", hideTip);
+  sc.addEventListener("click", (e) => { const hit = scatterHit(e); if (hit === null) return; const w8 = W(); openTrace(w8.recording[hit], w8.start[hit] + 1); });
+  const co = $("#corr");
+  co.addEventListener("mousemove", (e) => { const g = corrGeom; if (!g) return; const rect = co.getBoundingClientRect(); const i = Math.floor((e.clientY - rect.top - g.T) / g.cs), j = Math.floor((e.clientX - rect.left - g.L) / g.cs); const n = META.features.length; if (i < 0 || j < 0 || i >= n || j >= n) return hideTip(); showTip(`${META.features[i]} / ${META.features[j]}<br><b>r = ${fr(META.corr[S.corr][i][j], 2)}</b>`, e.clientX, e.clientY); });
+  co.addEventListener("mouseleave", hideTip);
+}
+let scatterIndex = null, corrGeom = null;
+function scatterTransform(f) { const vals = W().features[f]; const signed = vals.some((v) => v <= 0); const log = S.scale === "log" && !signed; return { log, tf: (v) => (log ? Math.log10(Math.max(v, 1e-6)) : v) }; }
+function drawFeatures() {
+  const w8 = W(), cv = $("#scatter"); const { ctx, w, h } = setupCanvas(cv);
+  const ax = scatterTransform(S.sx), ay = scatterTransform(S.sy);
+  const xs = w8.features[S.sx].map(ax.tf), ys = w8.features[S.sy].map(ay.tf);
+  const q = (arr, p) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(p * (s.length - 1))]; };
+  const xr = [q(xs, 0.004), q(xs, 0.999)], yr = [q(ys, 0.004), q(ys, 0.999)];
+  const padx = (xr[1] - xr[0]) * 0.04, pady = (yr[1] - yr[0]) * 0.04; xr[0] -= padx; xr[1] += padx; yr[0] -= pady; yr[1] += pady;
+  const L = 56, B = 34, T = 8, R = 10, pw = w - L - R, ph = h - T - B;
+  const X = (v) => L + ((v - xr[0]) / (xr[1] - xr[0])) * pw, Y = (v) => T + ph - ((v - yr[0]) / (yr[1] - yr[0])) * ph;
+  const tickLab = (log, v) => (log ? `10${supNum(v)}` : fmtNum(v));
+  const ticks = (r, log) => (log ? niceTicks(Math.ceil(r[0]), Math.floor(r[1]), 6).filter((v) => Number.isInteger(v)) : niceTicks(r[0], r[1], 6));
+  axisText(ctx, 10);
+  ticks(yr, ay.log).forEach((v) => { ctx.strokeStyle = css("--grid"); ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(L + pw, Y(v)); ctx.stroke(); ctx.textAlign = "right"; ctx.fillText(tickLab(ay.log, v), L - 5, Y(v) + 3); });
+  ticks(xr, ax.log).forEach((v) => { ctx.strokeStyle = css("--grid"); ctx.beginPath(); ctx.moveTo(X(v), T); ctx.lineTo(X(v), T + ph); ctx.stroke(); ctx.textAlign = "center"; ctx.fillText(tickLab(ax.log, v), X(v), T + ph + 14); });
+  ctx.fillText(`${S.sx}${ax.log ? " (log)" : ""}`, L + pw / 2, h - 2);
+  ctx.save(); ctx.translate(11, T + ph / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(`${S.sy}${ay.log ? " (log)" : ""}`, 0, 0); ctx.restore(); ctx.textAlign = "left";
+  ctx.save(); ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+  const grid = new Map(), cell = 8; const px = new Float32Array(xs.length), py = new Float32Array(xs.length);
+  [0, 1].forEach((cls) => {
+    ctx.fillStyle = css(cls ? "--crisis" : "--calm"); ctx.globalAlpha = cls ? 0.75 : 0.28;
+    for (let i = 0; i < xs.length; i++) { if (w8.cls[i] !== cls) continue; const x = X(xs[i]), y = Y(ys[i]); px[i] = x; py[i] = y; ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+      const k = `${Math.floor(x / cell)},${Math.floor(y / cell)}`; if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); }
+  });
+  ctx.globalAlpha = 1;
+  if (S.sel !== null) { ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(xs[S.sel]), Y(ys[S.sel]), 7, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.restore();
+  scatterIndex = { grid, px, py, cell };
+  const auc = META.comparison; $("#scatter-note").innerHTML = `AUC seule : ${S.sx} ${fr(auc[S.sx].auc, 3)}, ${S.sy} ${fr(auc[S.sy].auc, 3)}. Survoler un point pour voir sa fenêtre, cliquer pour l'ouvrir dans le tracé.`;
+  drawAuc(); drawCorr(); drawImportance();
+}
+function scatterHit(e) {
+  if (!scatterIndex) return null; const rect = $("#scatter").getBoundingClientRect(); const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const { grid, px, py, cell } = scatterIndex; let best = null, bd = 49;
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) { const arr = grid.get(`${Math.floor(x / cell) + dx},${Math.floor(y / cell) + dy}`); if (!arr) continue; for (const i of arr) { const d = (px[i] - x) ** 2 + (py[i] - y) ** 2; if (d < bd || (d === bd && W().cls[i])) { bd = d; best = i; } } }
+  return best;
+}
+function drawAuc() {
+  const cv = $("#aucbars"); const { ctx, w, h } = setupCanvas(cv);
+  const items = META.features.map((f) => [f, META.comparison[f]]).sort((a, b) => b[1].auc - a[1].auc);
+  const L = 78, R = 70, T = 6, row = (h - T - 24) / items.length, X = (v) => L + ((v - 0.5) / 0.5) * (w - L - R);
+  [0.5, 0.6, 0.7, 0.8, 0.9, 1].forEach((v) => { ctx.strokeStyle = css("--grid"); ctx.beginPath(); ctx.moveTo(X(v), T); ctx.lineTo(X(v), h - 20); ctx.stroke(); axisText(ctx, 10); ctx.textAlign = "center"; ctx.fillText(fr(v, 1), X(v), h - 6); });
+  items.forEach(([f, c], i) => { const y = T + i * row; ctx.fillStyle = f === S.sx || f === S.sy ? css("--accent") : css("--ink-3"); ctx.fillRect(X(0.5), y + row * 0.2, X(c.auc) - X(0.5), row * 0.6);
+    ctx.font = `500 12px "IBM Plex Sans", sans-serif`; ctx.fillStyle = css("--ink"); ctx.textAlign = "right"; ctx.fillText(f, L - 6, y + row * 0.68);
+    axisText(ctx, 10); ctx.textAlign = "left"; ctx.fillStyle = css("--ink-2"); ctx.fillText(fr(c.auc, 3), X(c.auc) + 4, y + row * 0.68);
+    const ratio = c.median0 > 0 && c.median1 > 0 ? `×${fr(c.median1 / c.median0, 0)}` : "—"; ctx.textAlign = "right"; ctx.fillText(ratio, w - 4, y + row * 0.68); });
+  ctx.textAlign = "left";
+}
+function drawCorr() {
+  const cv = $("#corr"); const { ctx, w, h } = setupCanvas(cv);
+  const F = META.features, n = F.length, M = META.corr[S.corr], L = 70, T = 6, cs = Math.min((w - L - 10) / n, (h - T - 70) / n);
+  corrGeom = { L, T, cs };
+  const neg = hexRgb(css("--m1")), pos = hexRgb(css("--crisis")), mid = hexRgb(css("--grid"));
+  const mix = (a, b, t) => a.map((x, i) => Math.round(x + (b[i] - x) * t));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { const r = M[i][j]; const c = r >= 0 ? mix(mid, pos, r) : mix(mid, neg, -r); ctx.fillStyle = `rgb(${c})`; ctx.fillRect(L + j * cs + 1, T + i * cs + 1, cs - 2, cs - 2);
+    if (cs > 26) { ctx.font = `10px "IBM Plex Mono", monospace`; ctx.fillStyle = Math.abs(r) > 0.6 ? "#fff" : css("--ink-2"); ctx.textAlign = "center"; ctx.fillText(fr(r, 2).replace("0,", ","), L + j * cs + cs / 2, T + i * cs + cs / 2 + 3); } }
+  ctx.textAlign = "right"; F.forEach((f, i) => { ctx.font = `11px "IBM Plex Sans", sans-serif`; ctx.fillStyle = css("--ink-2"); ctx.fillText(f, L - 5, T + i * cs + cs / 2 + 4); });
+  F.forEach((f, j) => { ctx.save(); ctx.translate(L + j * cs + cs / 2 + 3, T + n * cs + 6); ctx.rotate(-Math.PI / 3); ctx.textAlign = "right"; ctx.fillText(f, 0, 0); ctx.restore(); });
+  ctx.textAlign = "left";
+}
+function drawImportance() {
+  const cv = $("#importance"); const { ctx, w, h } = setupCanvas(cv);
+  const models = Object.keys(META.importance), F = META.features;
+  const order = F.map((f, i) => [f, models.reduce((a, m) => a + META.importance[m][i], 0)]).sort((a, b) => b[1] - a[1]).map((x) => x[0]);
+  const vmax = Math.ceil(Math.max(...models.flatMap((m) => META.importance[m])) * 10) / 10;
+  const L = 78, R = 10, T = 22, row = (h - T - 22) / F.length, bh = (row * 0.8) / models.length, X = (v) => L + v * (w - L - R) / vmax;
+  niceTicks(0, vmax, 5).forEach((v) => { ctx.strokeStyle = css("--grid"); ctx.beginPath(); ctx.moveTo(X(v), T); ctx.lineTo(X(v), h - 20); ctx.stroke(); axisText(ctx, 10); ctx.textAlign = "center"; ctx.fillText(fr(v, 1), X(v), h - 6); });
+  order.forEach((f, i) => { const fi = F.indexOf(f), y = T + i * row; models.forEach((m, k) => { ctx.fillStyle = modelColor(m); ctx.fillRect(X(0), y + row * 0.1 + k * bh, X(META.importance[m][fi]) - X(0), bh - 1); });
+    ctx.font = `500 12px "IBM Plex Sans", sans-serif`; ctx.fillStyle = css("--ink"); ctx.textAlign = "right"; ctx.fillText(f, L - 6, y + row * 0.6); });
+  ctx.textAlign = "left"; let lx = L; models.forEach((m) => { ctx.fillStyle = modelColor(m); ctx.fillRect(lx, 6, 10, 10); ctx.font = `12px "IBM Plex Sans", sans-serif`; ctx.fillStyle = css("--ink-2"); ctx.fillText(SHORT[m], lx + 14, 15); lx += ctx.measureText(SHORT[m]).width + 34; });
+}
+
+/* =====================================================================
+   Demarrage
+   ===================================================================== */
+async function start() {
+  applyTheme(storeGet("eeg-theme", "system"));
+  try {
+    const res = await fetch("data/meta.json"); if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    META = await res.json();
+  } catch (e) {
+    $("#loading").innerHTML = `Impossible de lire <code>data/meta.json</code> (${e.message}).<br>En local, lancez <code>python ui/serve.py</code> depuis le dossier du projet au lieu d'ouvrir le fichier directement.`;
+    return;
+  }
+  $("#loading").hidden = true;
+  const demo = META.recordings.findIndex((r) => r.id === "230102B_F_0000");
+  S.rec = demo < 0 ? 0 : demo; const s0 = META.recordings[S.rec].seizures[2] || [0, 0];
+  S.t0 = Math.max(0, s0[0] - 6); S.sel = windowIndex(S.rec, s0[0] + 2);
+  S.follow = S.sel;
+  buildOverview(); buildTrace(); buildModels(); buildTrees(); buildFeatures();
+  $("#rec-select").value = String(S.rec);
+  for (let k = 0; k < META.recordings[S.rec].chunks; k++) loadChunk(S.rec, k).then(scheduleDraw);
+  const v = location.hash.slice(1);
+  showView(["apercu", "trace", "modeles", "arbres", "features"].includes(v) ? v : "apercu");
+  if (document.fonts) document.fonts.ready.then(scheduleDraw);
+}
+start();
+</script>

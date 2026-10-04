@@ -1,0 +1,12 @@
+# Theme clair force : les figures matplotlib du projet sont dessinees sur fond
+# blanc avec une encre sombre. Laisser Streamlit basculer en sombre les rendrait
+# illisibles.
+[theme]
+base = "light"
+primaryColor = "#1f3a5f"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f3f5f8"
+textColor = "#1c2530"
+
+[browser]
+gatherUsageStats = false
