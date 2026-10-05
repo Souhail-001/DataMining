@@ -66,7 +66,8 @@ dessinées sur fond blanc et deviendraient illisibles en thème sombre.
 
 Station de lecture EEG dans le navigateur : tracé 19 voies avec les crises annotées et les
 prédictions des modèles, carte du scalp et spectre FFT de chaque fenêtre de 2 s, laboratoire
-du seuil de décision (Precision/Recall/F1 en direct), arbres Gini et entropie côte à côte avec
+du seuil de décision (Precision/Recall/F1 en direct), onglet « Sous-échantillonnage » (les 6 modèles
+ré-entraînés sur un entraînement rééquilibré 1:1, 1:3 ou 1:5, comparés avant/après), arbres Gini et entropie côte à côte avec
 le chemin de décision d'une fenêtre, nuage de points des caractéristiques.
 
 ```bash

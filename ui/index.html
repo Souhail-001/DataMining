@@ -229,6 +229,15 @@ input[type="range"] { accent-color: var(--accent); width: 160px; }
 .tooltip.on { opacity: 1; }
 .note { border-left: 3px solid var(--accent); padding: 8px 12px; background: var(--accent-soft); border-radius: 0 var(--radius) var(--radius) 0; font-size: 13px; color: var(--ink); max-width: none; }
 
+.delta { font: 500 11px var(--font-mono); padding: 1px 5px; border-radius: 3px; margin-left: 4px; white-space: nowrap; }
+.delta.up { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.delta.down { color: var(--crisis); background: var(--crisis-soft); }
+.ab { white-space: nowrap; font: 500 13px var(--font-mono); }
+.ab s { color: var(--ink-3); text-decoration: none; }
+#under-balance { width: 100%; height: 170px; display: block; }
+#under-dumbbell { width: 100%; height: 300px; display: block; }
+#upr, #uf1 { width: 100%; height: 260px; display: block; }
+.checks { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); display: grid; gap: 4px; }
 @media (max-width: 1100px) {
   .viewer { grid-template-columns: 1fr; }
   .side { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
@@ -252,6 +261,7 @@ input[type="range"] { accent-color: var(--accent); width: 160px; }
     <button role="tab" data-view="apercu" aria-selected="true">Vue d'ensemble</button>
     <button role="tab" data-view="trace">Tracé EEG</button>
     <button role="tab" data-view="modeles">Modèles</button>
+    <button role="tab" data-view="under">Sous-échantillonnage</button>
     <button role="tab" data-view="arbres">Gini / Entropie</button>
     <button role="tab" data-view="features">Caractéristiques</button>
   </nav>
@@ -408,6 +418,79 @@ input[type="range"] { accent-color: var(--accent); width: 160px; }
     </div>
   </section>
 
+  <!-- ===================================================== SOUS-ECHANTILLONNAGE -->
+  <section class="view" id="view-under" hidden>
+    <div>
+      <div class="label">Partie XII : traiter le déséquilibre des classes</div>
+      <h2>Les mêmes modèles, entraînés après sous-échantillonnage</h2>
+    </div>
+    <div class="grid-2">
+      <div class="panel">
+        <h3>L'idée</h3>
+        <p class="small">Il y a environ 24 fenêtres « hors crise » pour 1 fenêtre « crise ». Le modèle prend l'habitude de répondre « hors crise » quand il hésite. Le sous-échantillonnage <b>retire au hasard</b> une partie des fenêtres hors crise de l'entraînement, pour que le modèle voie les deux classes plus équitablement.</p>
+        <canvas id="under-balance" style="margin-top:10px" aria-label="Composition de l'entraînement"></canvas>
+      </div>
+      <div class="panel">
+        <h3>Ce qui change, ce qui ne change pas</h3>
+        <ul class="checks">
+          <li><b>Change :</b> seul l'ensemble d'entraînement est réduit. Toutes les fenêtres de crise sont gardées.</li>
+          <li><b>Ne change pas :</b> le jeu de test (5 799 fenêtres, 4,1 % de crises), les 12 caractéristiques, les 6 modèles et leurs grilles d'hyperparamètres.</li>
+          <li>Pendant la validation croisée, seul le pli d'entraînement est réduit ; le pli de validation garde la vraie proportion. Les scores restent donc honnêtes.</li>
+          <li><code>class_weight</code> est retiré des grilles : le rééquilibrage est déjà fait par le tirage.</li>
+          <li>Trois dosages : 1 fenêtre hors crise pour 1 crise (1:1), pour 3 (1:3), pour 5 (1:5).</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <div class="ctl"><span>Dosage</span><div class="seg" id="uratio-seg"><button data-v="1:1" aria-pressed="true">1:1</button><button data-v="1:3">1:3</button><button data-v="1:5">1:5</button></div></div>
+          <div class="ctl"><span>Évaluation</span><div class="seg" id="usrc-seg"><button data-v="test" aria-pressed="true">Test 80/20</button><button data-v="group">Nouveau patient</button></div></div>
+        </div>
+        <div class="legend"><span><i style="background:var(--ink-3);border-radius:50%;width:10px"></i>Avant (entraînement complet)</span><span><i style="background:var(--accent);border-radius:50%;width:10px"></i>Après sous-échantillonnage</span></div>
+      </div>
+      <p class="note" id="under-summary" style="margin-top:12px"></p>
+      <canvas id="under-dumbbell" style="margin-top:12px" aria-label="Avant et après, par modèle"></canvas>
+      <div class="scroll-x" style="margin-top:12px"><table class="bench" id="under-table"></table></div>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div>
+          <h3>Laboratoire du seuil, version sous-échantillonnée</h3>
+          <p class="small">Un modèle entraîné sur des données rééquilibrées « croit » que les crises sont fréquentes : ses probabilités sont gonflées. Remonter le seuil corrige en partie cet effet. Courbe grise : le même modèle sans sous-échantillonnage.</p>
+        </div>
+        <div class="model-chips" id="ulab-models"></div>
+      </div>
+      <div class="lab" style="margin-top:14px">
+        <div>
+          <label class="ctl"><span>Seuil <b class="mono" id="ulab-thr-val">0,50</b></span><input type="range" id="ulab-thr" min="0.02" max="0.98" step="0.01" value="0.5" style="width:100%"></label>
+          <div class="row" style="margin-top:6px;gap:6px">
+            <button class="btn" type="button" id="uthr-default">Seuil 0,50</button>
+            <button class="btn" type="button" id="uthr-best">Seuil du meilleur F1</button>
+          </div>
+          <div class="metric-big" style="margin-top:14px" id="ulab-metrics"></div>
+          <div class="cm" id="ulab-cm"></div>
+          <div class="events" id="ulab-events"></div>
+        </div>
+        <div><div class="label">Precision / Recall : avant (gris) et après</div><canvas id="upr"></canvas></div>
+        <div><div class="label">Métriques selon le seuil (après)</div><canvas id="uf1"></canvas></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Matrices de confusion sur le test 80/20, après sous-échantillonnage</h3>
+      <p class="small">Même jeu de test que l'onglet Modèles. Lignes : vérité ; colonnes : prédiction.</p>
+      <div class="cm-grid" id="ucm-grid" style="margin-top:12px"></div>
+    </div>
+
+    <div class="panel">
+      <h3>À retenir</h3>
+      <ul class="checks" id="under-takeaways"></ul>
+    </div>
+  </section>
+
   <!-- ===================================================== ARBRES -->
   <section class="view" id="view-arbres" hidden>
     <div>
@@ -536,6 +619,7 @@ const S = {
   model: "Random Forest", thr: 0.5, sel: null, // index global de la fenetre selectionnee
   labModel: "Random Forest", labThr: 0.5, bench: "test", treeDepth: 2, follow: null,
   sx: "Theta", sy: "Amplitude", scale: "log", corr: "pearson",
+  uRatio: "1:1", uSrc: "test", uModel: "Random Forest", uThr: 0.5,
 };
 const MODEL_COLORS = { "Random Forest": "--m1", "Gradient Boosting": "--m2", "SVM (RBF)": "--m3", "KNN": "--m4", "Decision Tree (Gini)": "--m5", "Decision Tree (Entropie)": "--m6" };
 const SHORT = { "Random Forest": "Random Forest", "Gradient Boosting": "Gradient Boosting", "SVM (RBF)": "SVM (RBF)", "KNN": "KNN", "Decision Tree (Gini)": "Arbre (Gini)", "Decision Tree (Entropie)": "Arbre (Entropie)" };
@@ -603,6 +687,10 @@ function samples(r, ch, i0, i1) {
 }
 function windowIndex(r, startSec) { const rec = META.recordings[r]; const i = clamp(Math.round(startSec), 0, rec.windows - 1); return rec.offset + i; }
 const W = () => META.windows;
+/** Probabilites d'un modele ; "Random Forest|1:1" = version sous-echantillonnee. */
+function probaOf(key) { const [m, r] = key.split("|"); return r && META.under ? META.under[r].proba[m] : META.windows.proba[m]; }
+function modelLabel(key) { const [m, r] = key.split("|"); return r ? `${SHORT[m]} · sous-éch. ${r}` : SHORT[m]; }
+const VIEWS = ["apercu", "trace", "modeles", "under", "arbres", "features"];
 
 /* =====================================================================
    Navigation
@@ -623,11 +711,12 @@ function drawAll() {
   if (S.view === "apercu") drawOverviewPage();
   if (S.view === "trace") drawTrace();
   if (S.view === "modeles") drawModels();
+  if (S.view === "under" && META.under) drawUnder();
   if (S.view === "arbres") drawTrees();
   if (S.view === "features") drawFeatures();
 }
 addEventListener("resize", scheduleDraw);
-addEventListener("hashchange", () => { const v = location.hash.slice(1); if (["apercu", "trace", "modeles", "arbres", "features"].includes(v)) showView(v); });
+addEventListener("hashchange", () => { const v = location.hash.slice(1); if (VIEWS.includes(v)) showView(v); });
 
 /* theme */
 const THEMES = ["system", "light", "dark"];
@@ -735,7 +824,9 @@ function buildTrace() {
   recSel.addEventListener("change", () => { const r = +recSel.value; const s = META.recordings[r].seizures[0]; openTrace(r, s ? s[0] : 0); });
   $("#single-ch").innerHTML = META.signal.channels.map((c, i) => `<option value="${i}">${c}</option>`).join("");
   $("#single-ch").addEventListener("change", (e) => { S.singleCh = +e.target.value; scheduleDraw(); });
-  const tm = $("#tr-model"); tm.innerHTML = META.models.map((m) => `<option ${m === S.model ? "selected" : ""}>${m}</option>`).join("");
+  const tm = $("#tr-model");
+  tm.innerHTML = `<optgroup label="Entraînement complet">${META.models.map((m) => `<option value="${m}" ${m === S.model ? "selected" : ""}>${m}</option>`).join("")}</optgroup>`
+    + (META.under ? Object.keys(META.under).map((r) => `<optgroup label="Sous-échantillonnage ${r}">${META.models.map((m) => `<option value="${m}|${r}">${m} · ${r}</option>`).join("")}</optgroup>`).join("") : "");
   tm.addEventListener("change", () => { S.model = tm.value; scheduleDraw(); });
   segment($("#span-seg"), (v) => { const c = S.t0 + S.span / 2; S.span = +v; S.t0 = clampT(c - S.span / 2); });
   segment($("#montage-seg"), (v) => { S.montage = v; $("#single-ch-wrap").hidden = v !== "1"; });
@@ -841,7 +932,7 @@ function drawTrace() {
   axisText(ctx, 10); ctx.textAlign = "right"; ctx.fillText(`${Math.round(Math.min(bar, plotH * 0.4) / gain)} µV`, left + plotW - 10, top + plotH - 10); ctx.textAlign = "left";
   // couloirs annotation / modele
   axisText(ctx, 10); ctx.fillText("Annot.", 4, top + plotH + 18); ctx.fillText("Modèle", 4, top + plotH + 36);
-  const w8 = W(), pr = w8.proba[S.model];
+  const w8 = W(), pr = probaOf(S.model);
   for (let s = Math.max(0, Math.floor(t0) - 2); s < Math.min(rec.windows, t1); s++) {
     const gi = rec.offset + s, p = pr[gi], x0 = X(s + 0.5), x1 = X(s + 1.5); // centre de la fenetre de 2 s
     ctx.globalAlpha = 0.15 + 0.85 * p; ctx.fillStyle = p >= S.thr ? css("--accent") : css("--calm");
@@ -867,7 +958,7 @@ function drawOverviewStrip() {
   for (let s = 0; s < rec.windows; s++) { const v = (clamp(Math.log10(rms[rec.offset + s] || 1e-3), lo, hi) - lo) / (hi - lo); const x = X(s + 1), y = h - 4 - v * (h * 0.55); s ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
   ctx.stroke();
   // probabilite du modele
-  const p = w8.proba[S.model];
+  const p = probaOf(S.model);
   for (let s = 0; s < rec.windows; s++) { const v = p[rec.offset + s]; if (v < S.thr) continue; ctx.fillStyle = css("--accent"); ctx.fillRect(X(s), 0, Math.max(1, X(2) - X(0)) / 2, 10); }
   ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.5; ctx.strokeRect(X(S.t0) + 0.75, 0.75, X(S.span) - 1.5, h - 1.5);
   axisText(ctx, 10); ctx.fillText("modèle", 4, 20); ctx.fillText("RMS", 4, h - 6);
@@ -1018,9 +1109,11 @@ function renderConfusions() {
     return `<div class="cm-mini"><h4><span class="swatch" style="background:${modelColor(n)}"></span> ${SHORT[n] || "Toujours 0"}</h4><div class="g">${cell(tn, tn + fp, true)}${cell(fp, tn + fp, false)}${cell(fn, fn + tp, false)}${cell(tp, fn + tp, true)}</div></div>`;
   }).join("");
 }
-function labCurves() {
-  if (labCache && labCache.model === S.labModel) return labCache;
-  const p = W().proba[S.labModel], y = W().cls, B = 1000, pos = new Float64Array(B + 1), neg = new Float64Array(B + 1);
+const curveCache = new Map();
+function labCurves() { return curvesOf(S.labModel); }
+function curvesOf(key) {
+  if (curveCache.has(key)) return curveCache.get(key);
+  const p = probaOf(key), y = W().cls, B = 1000, pos = new Float64Array(B + 1), neg = new Float64Array(B + 1);
   for (let i = 0; i < p.length; i++) (y[i] ? pos : neg)[Math.round(p[i] * B)]++;
   const P = pos.reduce((a, b) => a + b, 0), N = neg.reduce((a, b) => a + b, 0);
   const cumPos = new Float64Array(B + 2), cumNeg = new Float64Array(B + 2); // nombre >= seuil
@@ -1028,11 +1121,12 @@ function labCurves() {
   const at = (thr) => { const k = clamp(Math.ceil(thr * B - 1e-9), 0, B); const tp = cumPos[k], fp = cumNeg[k], fn = P - tp, tn = N - fp; const pr = tp + fp ? tp / (tp + fp) : 1, rc = tp / P; return { tp, fp, fn, tn, pr, rc, f1: tp ? (2 * tp) / (2 * tp + fp + fn) : 0, acc: (tp + tn) / (P + N) }; };
   let bestThr = 0.5, bestF1 = -1; const pts = [];
   for (let t = 0.01; t <= 0.99; t += 0.01) { const m = at(t); pts.push({ t, ...m }); if (m.f1 > bestF1) { bestF1 = m.f1; bestThr = +t.toFixed(2); } }
-  labCache = { model: S.labModel, at, pts, bestThr, bestF1, P, N };
-  return labCache;
+  const out = { model: key, at, pts, bestThr, bestF1, P, N };
+  curveCache.set(key, out);
+  return out;
 }
 function eventStats(model, thr) {
-  const w8 = W(), p = w8.proba[model]; let detected = 0, total = 0, falseAlarms = 0;
+  const w8 = W(), p = probaOf(model); let detected = 0, total = 0, falseAlarms = 0;
   META.recordings.forEach((rec) => {
     const segs = []; let cur = null;
     for (let s = 0; s < rec.windows; s++) { if (p[rec.offset + s] >= thr) { if (cur && s <= cur[1]) cur[1] = s + 2; else { cur = [s, s + 2]; segs.push(cur); } } }
@@ -1095,6 +1189,113 @@ function drawPatients(col) {
     ctx.save(); ctx.translate(x + bw / 2 + 3, T + ph + 6); ctx.rotate(-Math.PI / 4); axisText(ctx, 9); ctx.textAlign = "right"; ctx.fillText(META.recordings[r].label, 0, 0); ctx.restore();
   });
   ctx.textAlign = "left";
+}
+
+/* =====================================================================
+   SOUS-ECHANTILLONNAGE
+   ===================================================================== */
+function buildUnder() {
+  if (!META.under) { $("#view-under").innerHTML = `<p class="loading">Le fichier <code>ui/data/meta.json</code> chargé ne contient pas les résultats du sous-échantillonnage.<br>Lancez <code>python scripts/export_ui.py --under-only</code>, puis rechargez la page.</p>`; return; }
+  segment($("#uratio-seg"), (v) => { S.uRatio = v; renderUnderTable(); });
+  segment($("#usrc-seg"), (v) => { S.uSrc = v; renderUnderTable(); });
+  $("#ulab-models").innerHTML = META.models.map((m) => `<button type="button" data-m="${m}" aria-pressed="${m === S.uModel}"><span class="swatch" style="background:${modelColor(m)}"></span>${SHORT[m]}</button>`).join("");
+  $("#ulab-models").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; S.uModel = b.dataset.m; $$("#ulab-models button").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); scheduleDraw(); });
+  $("#ulab-thr").addEventListener("input", (e) => { S.uThr = +e.target.value; scheduleDraw(); });
+  $("#uthr-default").addEventListener("click", () => { S.uThr = 0.5; $("#ulab-thr").value = 0.5; scheduleDraw(); });
+  $("#uthr-best").addEventListener("click", () => { const c = curvesOf(`${S.uModel}|${S.uRatio}`); S.uThr = c.bestThr; $("#ulab-thr").value = c.bestThr; scheduleDraw(); });
+  const db = $("#under-dumbbell");
+  db.addEventListener("mousemove", (e) => { const g = dumbbellGeom; if (!g) return; const rect = db.getBoundingClientRect(); const y = e.clientY - rect.top, x = e.clientX - rect.left;
+    const k = Math.floor((y - g.T) / g.row), p = Math.floor((x - g.L) / g.pw); if (k < 0 || k >= g.models.length || p < 0 || p > 2) return hideTip();
+    const m = g.models[k], met = g.metrics[p]; showTip(`<b>${m}</b> · ${met}<br>avant ${fr(g.before[m][met], 3)} → après ${fr(g.after[m][met], 3)}`, e.clientX, e.clientY); });
+  db.addEventListener("mouseleave", hideTip);
+  renderUnderTable();
+}
+function srcOf(under) { const key = S.uSrc === "test" ? "test" : "group"; return under ? META.under[S.uRatio][key] : META.results[key]; }
+function deltaChip(a, b) { const d = b - a; if (Math.abs(d) < 0.0005) return `<span class="delta">=</span>`; return `<span class="delta ${d > 0 ? "up" : "down"}">${d > 0 ? "+" : "−"}${fr(Math.abs(d), 3)}</span>`; }
+function renderUnderTable() {
+  const before = srcOf(false), after = srcOf(true), U = META.under[S.uRatio];
+  const cell = (m, k) => `<span class="ab"><s>${fr(before[m][k], 3)}</s> → ${fr(after[m][k], 3)}</span>${deltaChip(before[m][k], after[m][k])}`;
+  let html = `<thead><tr><th>Modèle</th><th>Precision</th><th>Recall</th><th>F1-score</th><th>Accuracy</th><th>Crises touchées *</th><th>Fausses alarmes *</th><th>Hyperparamètres (après)</th></tr></thead><tbody>`;
+  META.models.forEach((m) => {
+    const e0 = eventStats(m, 0.5), e1 = eventStats(`${m}|${S.uRatio}`, 0.5);
+    html += `<tr><td class="m"><span class="swatch" style="background:${modelColor(m)}"></span> ${m}</td><td>${cell(m, "Precision")}</td><td>${cell(m, "Recall")}</td><td>${cell(m, "F1-score")}</td><td>${cell(m, "Accuracy")}</td>
+      <td class="ab"><s>${e0.detected}</s> → ${e1.detected} / ${e1.total}</td><td class="ab"><s>${e0.falseAlarms}</s> → ${e1.falseAlarms}</td>
+      <td class="small mono" style="white-space:normal;min-width:200px">${Object.entries(U.cv[m].params).map(([k, v]) => `${k}=${v}`).join(", ")}</td></tr>`;
+  });
+  $("#under-table").innerHTML = html + `</tbody><tfoot><tr><td colspan="8" class="small muted" style="padding-top:8px">* Prédictions par patient (chaque enregistrement prédit par un modèle entraîné sans lui), seuil 0,50. Une crise est « touchée » si au moins une de ses fenêtres est annoncée « crise ». Entraînement ${S.uRatio} : ${frInt(U.train.crise)} fenêtres de crise + ${frInt(U.train.hors_crise)} hors crise (sur ${frInt(U.train.hors_crise_total)}).</td></tr></tfoot>`;
+  const avg = (src, k) => META.models.reduce((a, m) => a + src[m][k], 0) / META.models.length;
+  $("#under-summary").innerHTML = `En moyenne sur les 6 modèles (${S.uSrc === "test" ? "test 80/20" : "nouveau patient"}, dosage ${S.uRatio}) : le <b>Recall</b> passe de ${fr(avg(before, "Recall"), 2)} à <b>${fr(avg(after, "Recall"), 2)}</b>, la <b>Precision</b> de ${fr(avg(before, "Precision"), 2)} à <b>${fr(avg(after, "Precision"), 2)}</b> et le <b>F1</b> de ${fr(avg(before, "F1-score"), 2)} à <b>${fr(avg(after, "F1-score"), 2)}</b>. On rate moins de crises, au prix de plus de fausses alarmes.`;
+  const r1 = META.under["1:1"].test, r5 = META.under["1:5"].test, t0 = META.results.test;
+  const rf = "Random Forest";
+  $("#under-takeaways").innerHTML = [
+    `Le sous-échantillonnage fait monter le <b>Recall</b> de tous les modèles. Random Forest sur le test : ${fr(t0[rf].Recall, 2)} sans, ${fr(r1[rf].Recall, 2)} en 1:1. On rate beaucoup moins de crises.`,
+    `En échange, la <b>Precision</b> baisse fortement (${fr(t0[rf].Precision, 2)} → ${fr(r1[rf].Precision, 2)} pour Random Forest en 1:1) : le modèle annonce des crises qui n'en sont pas.`,
+    `Le <b>F1</b> baisse donc au seuil 0,50. Plus le dosage est doux (1:3, 1:5), plus on retrouve la Precision, et le F1 remonte (Random Forest : ${fr(r1[rf]["F1-score"], 2)} en 1:1, ${fr(r5[rf]["F1-score"], 2)} en 1:5).`,
+    `Les courbes Precision/Recall avant et après sont proches : le sous-échantillonnage déplace surtout le <b>point de fonctionnement</b> sur la courbe, comme une baisse du seuil. Il ne rend pas le modèle meilleur pour séparer les classes ; la courbe est même un peu en dessous, car le modèle apprend sur beaucoup moins de fenêtres hors crise.`,
+    `Le choix dépend de l'usage : pour une alerte médicale, rater une crise coûte plus cher qu'une fausse alarme, et un Recall élevé peut être préférable même avec un F1 plus bas (lien avec la Question 13).`,
+  ].map((t) => `<li>${t}</li>`).join("");
+  renderUnderConfusions(); scheduleDraw();
+}
+function renderUnderConfusions() {
+  const cm = META.under[S.uRatio].confusion;
+  $("#ucm-grid").innerHTML = Object.entries(cm).map(([n, c]) => {
+    const tp = c["VP (crise detectee)"], fn = c["FN (crise manquee)"], fp = c["FP (fausse alarme)"], tn = c["VN"];
+    const cell = (v, tot, good) => `<div style="background:${good ? "var(--accent-soft)" : "var(--grid)"};${v / tot > 0.5 && good ? "font-weight:700" : ""}">${frInt(v)}<br><span class="muted" style="font-size:10px">${Math.round((v / tot) * 100)} %</span></div>`;
+    return `<div class="cm-mini"><h4><span class="swatch" style="background:${modelColor(n)}"></span> ${SHORT[n]}</h4><div class="g">${cell(tn, tn + fp, true)}${cell(fp, tn + fp, false)}${cell(fn, fn + tp, false)}${cell(tp, fn + tp, true)}</div></div>`;
+  }).join("");
+}
+let dumbbellGeom = null;
+function drawUnder() {
+  // composition de l'entrainement
+  { const cv = $("#under-balance"); const { ctx, w, h } = setupCanvas(cv); const U = META.under;
+    const rows = [["Sans", META.results.split.train - META.results.split.train_pos, META.results.split.train_pos], ...Object.keys(U).map((r) => [`Sous-éch. ${r}`, U[r].train.hors_crise, U[r].train.crise])];
+    const L = 96, R = 200, row = (h - 10) / rows.length, max = rows[0][1] + rows[0][2], X = (v) => (v / max) * (w - L - R);
+    rows.forEach(([lab, n0, n1], i) => { const y = 4 + i * row, bh = row * 0.58; const on = lab.endsWith(S.uRatio);
+      ctx.fillStyle = css("--calm"); ctx.fillRect(L, y, Math.max(1, X(n0)), bh); ctx.fillStyle = css("--crisis"); ctx.fillRect(L + X(n0) + 2, y, Math.max(2, X(n1)), bh);
+      ctx.font = `${on ? 600 : 500} 12px "IBM Plex Sans", sans-serif`; ctx.fillStyle = css("--ink"); ctx.textAlign = "right"; ctx.fillText(lab, L - 8, y + bh * 0.75);
+      axisText(ctx, 10); ctx.textAlign = "left"; ctx.fillStyle = css("--ink-2"); ctx.fillText(`${frInt(n0)} + ${frInt(n1)}  (${fr((n1 / (n0 + n1)) * 100, 0)} % crise)`, L + X(n0) + X(n1) + 8, y + bh * 0.75); });
+    ctx.textAlign = "left"; }
+  // haltères avant / après
+  { const cv = $("#under-dumbbell"); const { ctx, w, h } = setupCanvas(cv);
+    const before = srcOf(false), after = srcOf(true), metrics = ["Precision", "Recall", "F1-score"], models = META.models;
+    const L = 128, T = 26, gap = 34, pw = (w - L - 10 - gap * 2) / 3, row = (h - T - 22) / models.length;
+    dumbbellGeom = { L, T, pw: pw + gap, row, models, metrics, before, after };
+    metrics.forEach((met, j) => { const x0 = L + j * (pw + gap), X = (v) => x0 + v * pw;
+      ctx.font = `600 12px "IBM Plex Sans", sans-serif`; ctx.fillStyle = css("--ink"); ctx.fillText(met, x0, 14);
+      [0, 0.5, 1].forEach((v) => { ctx.strokeStyle = css("--grid"); ctx.beginPath(); ctx.moveTo(X(v), T - 4); ctx.lineTo(X(v), h - 18); ctx.stroke(); axisText(ctx, 10); ctx.textAlign = v === 0 ? "left" : v === 1 ? "right" : "center"; ctx.fillText(v === 0.5 ? "0,5" : String(v), X(v), h - 4); ctx.textAlign = "left"; });
+      models.forEach((m, k) => { const y = T + row * (k + 0.5), a = before[m][met], b = after[m][met];
+        ctx.strokeStyle = css("--grid-strong"); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(X(a), y); ctx.lineTo(X(b), y); ctx.stroke();
+        ctx.fillStyle = css("--ink-3"); ctx.beginPath(); ctx.arc(X(a), y, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = css("--accent"); ctx.strokeStyle = css("--panel"); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(b), y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }); });
+    models.forEach((m, k) => { const y = T + row * (k + 0.5); ctx.fillStyle = modelColor(m); ctx.fillRect(0, y - 5, 10, 10); ctx.font = `500 12px "IBM Plex Sans", sans-serif`; ctx.fillStyle = css("--ink"); ctx.fillText(SHORT[m], 16, y + 4); }); }
+  // laboratoire
+  const key = `${S.uModel}|${S.uRatio}`, c = curvesOf(key), c0 = curvesOf(S.uModel), m = c.at(S.uThr), m0 = c0.at(0.5), col = modelColor(S.uModel);
+  $("#ulab-thr-val").textContent = fr(S.uThr, 2);
+  $("#ulab-metrics").innerHTML = [["Precision", m.pr, m0.pr], ["Recall", m.rc, m0.rc], ["F1-score", m.f1, m0.f1], ["Accuracy", m.acc, m0.acc]].map(([k, v, v0]) => `<div><b>${fr(v, 3)}</b><span>${k} · avant ${fr(v0, 3)}</span></div>`).join("");
+  const cell = (v, tot, good, lab) => `<div style="background:${good ? "var(--accent-soft)" : "var(--grid)"}"><span class="v">${frInt(v)}<small>${lab} · ${fr((v / tot) * 100, 1)} %</small></span></div>`;
+  $("#ulab-cm").innerHTML = `<div class="h"></div><div class="h">prédit hors crise</div><div class="h">prédit crise</div>
+    <div class="h" style="writing-mode:vertical-rl;transform:rotate(180deg)">réel 0</div>${cell(m.tn, m.tn + m.fp, true, "VN")}${cell(m.fp, m.tn + m.fp, false, "fausses alarmes")}
+    <div class="h" style="writing-mode:vertical-rl;transform:rotate(180deg)">réel 1</div>${cell(m.fn, m.fn + m.tp, false, "crises manquées")}${cell(m.tp, m.fn + m.tp, true, "VP")}`;
+  const ev = eventStats(key, S.uThr), ev0 = eventStats(S.uModel, 0.5);
+  $("#ulab-events").innerHTML = `<div><b>${ev.detected} / ${ev.total}</b><span>crises touchées<br>(avant : ${ev0.detected})</span></div><div><b>${ev.falseAlarms}</b><span>épisodes de fausse alarme<br>(avant : ${ev0.falseAlarms})</span></div>`;
+  { const cv = $("#upr"); const { ctx, w, h } = setupCanvas(cv);
+    const { X, Y } = chartFrame(ctx, w, h, 40, 30, 10, 10, [0, 1], [0, 1], "Recall (crises détectées)", "Precision");
+    ctx.strokeStyle = css("--ink-3"); ctx.lineWidth = 1.8; ctx.setLineDash([5, 4]); ctx.beginPath(); c0.pts.forEach((p, i) => (i ? ctx.lineTo(X(p.rc), Y(p.pr)) : ctx.moveTo(X(p.rc), Y(p.pr)))); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = col; ctx.lineWidth = 2.2; ctx.beginPath(); c.pts.forEach((p, i) => (i ? ctx.lineTo(X(p.rc), Y(p.pr)) : ctx.moveTo(X(p.rc), Y(p.pr)))); ctx.stroke();
+    ctx.fillStyle = css("--ink-3"); ctx.beginPath(); ctx.arc(X(m0.rc), Y(m0.pr), 5, 0, Math.PI * 2); ctx.fill();
+    axisText(ctx, 10); ctx.fillText("avant, seuil 0,50", clamp(X(m0.rc) - 100, 44, w - 110), Y(m0.pr) - 9);
+    ctx.fillStyle = css("--panel"); ctx.strokeStyle = css("--ink"); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(m.rc), Y(m.pr), 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    axisText(ctx, 11); ctx.fillStyle = css("--ink"); ctx.fillText(`après, seuil ${fr(S.uThr, 2)}`, clamp(X(m.rc) - 110, 44, w - 120), Y(m.pr) + 20); }
+  drawF1CurveOn($("#uf1"), c, col, S.uThr);
+}
+function drawF1CurveOn(cv, c, col, thr) {
+  const { ctx, w, h } = setupCanvas(cv);
+  const { X, Y, ph } = chartFrame(ctx, w, h, 40, 30, 10, 10, [0, 1], [0, 1], "Seuil de décision", "");
+  const series = [["pr", "Precision", css("--ink-3"), [4, 3]], ["rc", "Recall", css("--ink-2"), [1, 3]], ["f1", "F1", col, []]];
+  series.forEach(([k, lab, cc, dash]) => { ctx.strokeStyle = cc; ctx.lineWidth = k === "f1" ? 2.4 : 1.6; ctx.setLineDash(dash); ctx.beginPath(); c.pts.forEach((p, i) => (i ? ctx.lineTo(X(p.t), Y(p[k])) : ctx.moveTo(X(p.t), Y(p[k])))); ctx.stroke(); ctx.setLineDash([]); const ref = c.pts[k === "pr" ? 4 : k === "rc" ? 9 : 14]; axisText(ctx, 10); ctx.fillStyle = cc; ctx.fillText(lab, X(ref.t) + 4, Y(ref[k]) + (k === "rc" ? 14 : -6)); });
+  ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(X(thr), 10); ctx.lineTo(X(thr), 10 + ph); ctx.stroke();
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(c.bestThr), Y(c.bestF1), 4, 0, Math.PI * 2); ctx.fill();
+  axisText(ctx, 10); ctx.fillStyle = css("--ink"); ctx.fillText(`F1 max ${fr(c.bestF1, 3)} à ${fr(c.bestThr, 2)}`, clamp(X(c.bestThr) + 8, 44, w - 140), Y(c.bestF1) - 8);
 }
 
 /* =====================================================================
@@ -1303,7 +1504,7 @@ function drawImportance() {
 async function start() {
   applyTheme(storeGet("eeg-theme", "system"));
   try {
-    const res = await fetch("data/meta.json"); if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch("data/meta.json", { cache: "no-cache" }); if (!res.ok) throw new Error(`HTTP ${res.status}`);
     META = await res.json();
   } catch (e) {
     $("#loading").innerHTML = `Impossible de lire <code>data/meta.json</code> (${e.message}).<br>En local, lancez <code>python ui/serve.py</code> depuis le dossier du projet au lieu d'ouvrir le fichier directement.`;
@@ -1314,11 +1515,11 @@ async function start() {
   S.rec = demo < 0 ? 0 : demo; const s0 = META.recordings[S.rec].seizures[2] || [0, 0];
   S.t0 = Math.max(0, s0[0] - 6); S.sel = windowIndex(S.rec, s0[0] + 2);
   S.follow = S.sel;
-  buildOverview(); buildTrace(); buildModels(); buildTrees(); buildFeatures();
+  buildOverview(); buildTrace(); buildModels(); buildUnder(); buildTrees(); buildFeatures();
   $("#rec-select").value = String(S.rec);
   for (let k = 0; k < META.recordings[S.rec].chunks; k++) loadChunk(S.rec, k).then(scheduleDraw);
   const v = location.hash.slice(1);
-  showView(["apercu", "trace", "modeles", "arbres", "features"].includes(v) ? v : "apercu");
+  showView(VIEWS.includes(v) ? v : "apercu");
   if (document.fonts) document.fonts.ready.then(scheduleDraw);
 }
 start();

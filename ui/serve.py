@@ -19,8 +19,18 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
 if not (HERE / "data" / "meta.json").is_file():
     sys.exit("ui/data/meta.json manquant : lancez d'abord  python scripts/export_ui.py")
 
-Handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(HERE))
-Handler.log_message = lambda *args: None  # console silencieuse
+class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
+    """Toujours servir la derniere version (pas d'ancienne page gardee en cache)."""
+
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
+    def log_message(self, *args):  # console silencieuse
+        pass
+
+
+Handler = functools.partial(NoCacheHandler, directory=str(HERE))
 
 with socketserver.ThreadingTCPServer(("127.0.0.1", PORT), Handler) as httpd:
     url = f"http://127.0.0.1:{PORT}/index.html"

@@ -3,6 +3,7 @@
 Usage (depuis la racine du projet) :
     python scripts/export_ui.py            # tout (environ 10 minutes)
     python scripts/export_ui.py --no-signal  # sans re-exporter les signaux
+    python scripts/export_ui.py --under-only # seulement l'onglet sous-echantillonnage
 
 Produit dans `ui/data/` :
     meta.json            enregistrements, crises, fenetres, caracteristiques,
@@ -44,7 +45,7 @@ from src.evaluation import compute_metrics, confusion_table, results_table  # no
 from src.exploration import class_comparison, seizure_statistics  # noqa: E402
 from src.features import BANDS, EEG_CHANNELS, FEATURES, build_dataset  # noqa: E402
 from src.preprocessing import clean_recording  # noqa: E402
-from src.training import depth_curve, split_data, tune_models  # noqa: E402
+from src.training import depth_curve, split_data, tune_models, undersampled_catalog  # noqa: E402
 
 OUT = ROOT / "ui" / "data"
 UI_RATE = 128           # Hz : le signal est deja filtre sous 40 Hz, 128 Hz suffit
@@ -134,6 +135,69 @@ def tree_json(tree):
         "depth": int(tree.get_depth()),
         "leaves": int(tree.get_n_leaves()),
     }
+
+
+UNDER_RATIOS = {"1:1": 1.0, "1:3": 3.0, "1:5": 5.0}
+
+
+def oof_probabilities(models, names, X, y, folds):
+    """Probabilite de crise de chaque fenetre, predite par un modele entraine sans son patient."""
+    out = {}
+    for name in names:
+        t0 = time.time()
+        proba = np.zeros(len(X))
+        for tr, te in folds:
+            model = clone(models[name].estimator).fit(X.iloc[tr], y.iloc[tr])
+            if name.startswith("SVM"):
+                # distance a la frontiere -> sigmoide : score >= 0,5 <=> prediction "crise"
+                proba[te] = 1.0 / (1.0 + np.exp(-model.decision_function(X.iloc[te])))
+            else:
+                proba[te] = model.predict_proba(X.iloc[te])[:, 1]
+        out[name] = proba
+        print(f"  {name}: {time.time() - t0:.1f} s")
+    return out
+
+
+def export_undersampling(dataset, names):
+    """Memes modeles et memes tests, entrainement sous-echantillonne (Partie XII)."""
+    X, y, groups = dataset[FEATURES], dataset["Class"], dataset["recording_id"]
+    X_train, X_test, y_train, y_test = split_data(dataset, FEATURES)
+    folds = list(GroupKFold(n_splits=5).split(X, y, groups))
+    section = {}
+    for label, ratio in UNDER_RATIOS.items():
+        print(f"Sous-echantillonnage {label}")
+        tuned = tune_models(X_train, y_train, catalog=undersampled_catalog(ratio))
+        test_table = results_table({n: tuned[n] for n in names}, X_test, y_test)
+        confusions = confusion_table({n: tuned[n] for n in names}, X_test, y_test)
+        oof = oof_probabilities(tuned, names, X, y, folds)
+        kept = tuned[names[0]].estimator.kept_
+        section[label] = {
+            "ratio": ratio,
+            "train": {"crise": kept["crise"], "hors_crise": kept["hors_crise"],
+                      "hors_crise_total": int((y_train == 0).sum())},
+            "test": {n: {k: round(float(v), 4) for k, v in test_table.loc[n].items()} for n in names},
+            "confusion": {n: {k: int(v) for k, v in confusions.loc[n].items()} for n in names},
+            "cv": {n: {"f1": round(tuned[n].cv_f1, 4), "std": round(tuned[n].cv_f1_std, 4),
+                       "params": {k.replace("estimator__", ""): (v if isinstance(v, (int, float, str)) or v is None else str(v))
+                                  for k, v in tuned[n].best_params.items()}}
+                   for n in names},
+            "group": {n: {k: round(float(v), 4) for k, v in compute_metrics(y, (oof[n] >= 0.5).astype(int)).items()}
+                      for n in names},
+            "proba": {n: [round(float(p), 3) for p in oof[n]] for n in names},
+        }
+        for n in names:
+            print(f"  {n:26s} test P {test_table.loc[n, 'Precision']:.3f} R {test_table.loc[n, 'Recall']:.3f} F1 {test_table.loc[n, 'F1-score']:.3f}")
+    return section
+
+
+def under_only():
+    meta_path = OUT / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    dataset = pd.read_csv(ROOT / "data/processed/windows_features.csv")
+    meta["under"] = export_undersampling(dataset, meta["models"])
+    meta = no_nan(meta)
+    meta_path.write_text(json.dumps(meta, allow_nan=False, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    print(f"meta.json : {meta_path.stat().st_size / 1e6:.1f} Mo")
 
 
 def main(with_signal=True):
@@ -275,6 +339,7 @@ def main(with_signal=True):
                  "spearman": np.round(dataset[FEATURES].corr("spearman").to_numpy(), 3).tolist()},
     }
 
+    meta["under"] = export_undersampling(dataset, names)
     meta = no_nan(meta)
     (OUT / "meta.json").write_text(json.dumps(meta, allow_nan=False, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"meta.json : {(OUT / 'meta.json').stat().st_size / 1e6:.1f} Mo")
@@ -285,4 +350,9 @@ def main(with_signal=True):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--no-signal", action="store_true", help="ne pas re-exporter les signaux")
-    main(with_signal=not parser.parse_args().no_signal)
+    parser.add_argument("--under-only", action="store_true", help="seulement l'onglet sous-echantillonnage")
+    args = parser.parse_args()
+    if args.under_only:
+        under_only()
+    else:
+        main(with_signal=not args.no_signal)

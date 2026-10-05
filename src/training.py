@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator, TransformerMixin, clone
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin, clone
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_validate, train_test_split
@@ -41,6 +41,8 @@ __all__ = [
     "tune_models",
     "tuning_summary",
     "depth_curve",
+    "UnderSampledClassifier",
+    "undersampled_catalog",
 ]
 
 RANDOM_STATE = 42
@@ -256,3 +258,55 @@ def depth_curve(
             )
 
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Sous-echantillonnage (Partie XII : traiter le desequilibre des classes)
+# ---------------------------------------------------------------------------
+class UnderSampledClassifier(ClassifierMixin, BaseEstimator):
+    """Entraine `estimator` sur un entrainement reequilibre.
+
+    A chaque `fit`, on garde toutes les fenetres de crise et seulement
+    `ratio` x (nombre de crises) fenetres hors crise, tirees au hasard.
+    Les donnees de validation et de test ne sont jamais touchees : dans une
+    validation croisee, seul le pli d'entrainement est sous-echantillonne.
+    """
+
+    def __init__(self, estimator=None, ratio=1.0, random_state=RANDOM_STATE):
+        self.estimator = estimator
+        self.ratio = ratio
+        self.random_state = random_state
+
+    def fit(self, X, y):
+        y = np.asarray(y)
+        rng = np.random.default_rng(self.random_state)
+        pos, neg = np.flatnonzero(y == 1), np.flatnonzero(y == 0)
+        n_neg = min(len(neg), int(round(self.ratio * len(pos))))
+        keep = np.sort(np.concatenate([pos, rng.choice(neg, n_neg, replace=False)]))
+        X_kept = X.iloc[keep] if hasattr(X, "iloc") else np.asarray(X)[keep]
+        self.estimator_ = clone(self.estimator).fit(X_kept, y[keep])
+        self.classes_ = self.estimator_.classes_
+        self.kept_ = {"crise": int(len(pos)), "hors_crise": int(n_neg)}
+        return self
+
+    def predict(self, X):
+        return self.estimator_.predict(X)
+
+    def predict_proba(self, X):
+        return self.estimator_.predict_proba(X)
+
+    def decision_function(self, X):
+        return self.estimator_.decision_function(X)
+
+
+def undersampled_catalog(ratio: float = 1.0, random_state: int = RANDOM_STATE) -> dict:
+    """Memes modeles et memes grilles que `model_catalog`, entraines apres sous-echantillonnage.
+
+    `class_weight` est retire des grilles : le reequilibrage est deja fait
+    par le tirage, on ne le compense pas une deuxieme fois.
+    """
+    catalog = {}
+    for name, (estimator, grid) in model_catalog(random_state).items():
+        grid = {f"estimator__{k}": v for k, v in grid.items() if not k.endswith("class_weight")}
+        catalog[name] = (UnderSampledClassifier(estimator, ratio=ratio, random_state=random_state), grid)
+    return catalog
