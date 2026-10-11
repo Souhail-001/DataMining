@@ -1,0 +1,3 @@
+recording_id,seizure,start_value,end_value,annotation_unit,start_s,end_s,reported_count,duration_s,excel_start_clock_s,excel_end_clock_s,header_label,alignment_source
+210928B-B,1,0.393831018518519,0.394178240740741,excel_days,1162.1640625,1192.1640625,2.0,30.0,34027.0,34057.0,ABSENCE,header onset + Excel duration; chronological pairing
+210928B-B,2,0.395428240740741,0.395717592592593,excel_days,1291.9140625,1316.9140625,2.0,25.0,34165.0,34190.0,ABSENCE,header onset + Excel duration; chronological pairing

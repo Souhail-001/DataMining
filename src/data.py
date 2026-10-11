@@ -485,59 +485,96 @@ def load_recording(
 # ---------------------------------------------------------------------------
 # Annotations cliniques (fichier Excel) - utilisees a partir de la Partie II
 # ---------------------------------------------------------------------------
+def annotation_time_seconds(value, time_unit: str) -> float:
+    """Convert an annotation using its explicitly supplied interpretation.
+
+    ``minutes_seconds_centiseconds`` interprets displayed ``MM:SS:CC``.
+    Excel stores these three groups as an HH:MM:SS day fraction, so recover
+    the groups before applying their explicitly selected meaning. For example,
+    Excel's 11:19:13 represents 11*60 + 19 + 13/100 = 679.13 seconds.
+    """
+    if time_unit == "minutes_seconds_centiseconds":
+        if isinstance(value, str):
+            parts = value.strip().split(":")
+            if len(parts) != 3 or not all(part.isdigit() for part in parts):
+                raise ValueError(f"Expected MM:SS:CC, got {value!r}")
+            minutes, seconds, centiseconds = map(int, parts)
+        else:
+            value = float(value)
+            if not np.isfinite(value) or not 0 <= value < 1:
+                raise ValueError("Expected an Excel time fraction in [0, 1).")
+            packed_seconds = value * 86400
+            rounded = round(packed_seconds)
+            if not np.isclose(packed_seconds, rounded, rtol=0, atol=1e-5):
+                raise ValueError("Excel time has sub-second groups; expected MM:SS:CC.")
+            minutes, remainder = divmod(rounded, 3600)
+            seconds, centiseconds = divmod(remainder, 60)
+        if not 0 <= seconds < 60 or not 0 <= centiseconds < 100:
+            raise ValueError(f"Invalid MM:SS:CC groups in {value!r}")
+        return round(minutes * 60 + seconds + centiseconds / 100, 9)
+    factors = {"minutes": 60.0, "seconds": 1.0, "excel_days": 86400.0}
+    if time_unit not in factors:
+        raise ValueError("Unknown annotation time unit.")
+    return round(float(value) * factors[time_unit], 9)
+
+
 def load_seizure_annotations(
     root: Path | str | None = None,
     filename: str = "Crises absences.xlsx",
+    *,
+    time_unit: str,
 ) -> pd.DataFrame:
-    """Met les annotations de crises au format long (une ligne = une crise).
+    """Read one row per seizure, converting explicitly declared units to seconds.
 
-    Le fichier Excel range les crises en colonnes (`DebCE1`, `FinCE1`, ...) et
-    les instants sont des fractions de journee. On les convertit en secondes
-    depuis minuit.
+    Use ``minutes_seconds_centiseconds`` for the legacy MM:SS:CC
+    display convention. Other explicitly supported units are numeric minutes,
+    seconds and Excel days. No time offset is inferred. Source values are
+    retained for auditing the conversion.
     """
-    path = raw_dir(root) / filename
-    table = pd.read_excel(path)
-
+    units = ("minutes_seconds_centiseconds", "minutes", "seconds", "excel_days")
+    if time_unit not in units:
+        raise ValueError(f"time_unit must be one of {units}")
+    table = pd.read_excel(raw_dir(root) / filename)
     table = table.rename(columns={table.columns[0]: "recording_id"})
     table.columns = [str(column).strip() for column in table.columns]
-
-    # Deux colonnes sont mal orthographiees dans le fichier source.
     table = table.rename(columns={"DebutCE5": "DebCE5", "DebtCE11": "DebCE11"})
     table = table.dropna(how="all")
     table = table[table["recording_id"].notna()].copy()
-
-    numbers = sorted(
-        int(column[len("DebCE") :])
+    numbers = sorted({
+        int(column[len(prefix):])
         for column in table.columns
-        if column.startswith("DebCE") and column[len("DebCE") :].isdigit()
-    )
-
+        for prefix in ("DebCE", "FinCE")
+        if column.startswith(prefix) and column[len(prefix):].isdigit()
+    })
     rows = []
     for _, record in table.iterrows():
         for number in numbers:
             start = record.get(f"DebCE{number}")
             end = record.get(f"FinCE{number}")
-
-            if pd.isna(start) or pd.isna(end):
+            if pd.isna(start) and pd.isna(end):
                 continue
-
-            rows.append(
-                {
-                    "recording_id": str(record["recording_id"]).strip(),
-                    "seizure": number,
-                    "start_s": float(start) * 86400.0,
-                    "end_s": float(end) * 86400.0,
-                    "reported_count": record.get("NombreCE", np.nan),
-                }
-            )
-
-    seizures = pd.DataFrame(
-        rows,
-        columns=["recording_id", "seizure", "start_s", "end_s", "reported_count"],
-    )
+            if pd.isna(start) or pd.isna(end):
+                raise ValueError(f"Incomplete seizure {number}: {record['recording_id']}")
+            start_s = annotation_time_seconds(start, time_unit)
+            end_s = annotation_time_seconds(end, time_unit)
+            if not np.isfinite([start_s, end_s]).all() or start_s < 0 or end_s <= start_s:
+                raise ValueError(f"Invalid seizure {number}: {record['recording_id']}")
+            rows.append({
+                "recording_id": str(record["recording_id"]).strip().upper(),
+                "seizure": number,
+                "start_value": start,
+                "end_value": end,
+                "annotation_unit": time_unit,
+                "start_s": start_s,
+                "end_s": end_s,
+                "reported_count": record.get("NombreCE", np.nan),
+            })
+    seizures = pd.DataFrame(rows, columns=[
+        "recording_id", "seizure", "start_value", "end_value", "annotation_unit",
+        "start_s", "end_s", "reported_count",
+    ])
     seizures["duration_s"] = seizures["end_s"] - seizures["start_s"]
-
-    return seizures
+    return seizures.sort_values(["recording_id", "start_s"]).reset_index(drop=True)
 
 
 def match_recording_id(recording_id: str) -> str:
@@ -578,7 +615,7 @@ def summarize(recording: Recording) -> pd.DataFrame:
         (
             "Unite d'amplitude",
             recording.amplitude_unit
-            or "non renseignee dans le fichier (microvolt par convention)",
+            or "non renseignee dans le fichier",
         ),
         ("Marqueurs dans l'entete", len(recording.events)),
         ("Taille en memoire", f"{data.memory_usage(deep=True).sum() / 1024**2:.1f} Mo"),
@@ -660,3 +697,23 @@ def saturation_report(recording: Recording, tolerance: float = 0.999) -> pd.Data
     report = report.sort_values("echantillons_satures", ascending=False)
 
     return report.reset_index(drop=True)
+
+
+def align_clock_annotations(annotations: pd.DataFrame, recording_start: str) -> pd.DataFrame:
+    """Convert Excel clock seconds to elapsed seconds using a supplied start clock.
+
+    A midnight rollover is supported for recordings lasting less than 24 hours.
+    The start clock must come from the recording, never from signal appearance.
+    """
+    from datetime import datetime
+    clock = datetime.strptime(recording_start, '%H:%M:%S')
+    origin = clock.hour * 3600 + clock.minute * 60 + clock.second
+    if not annotations.annotation_unit.eq('excel_days').all():
+        raise ValueError('Load clock annotations with time_unit="excel_days".')
+    result = annotations.copy()
+    duration = result.end_s - result.start_s
+    result['start_s'] = (result.start_s - origin) % 86400
+    result['end_s'] = result.start_s + duration
+    result['duration_s'] = duration
+    result['recording_start_clock'] = recording_start
+    return result.sort_values('start_s').reset_index(drop=True)

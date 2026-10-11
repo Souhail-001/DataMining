@@ -1,0 +1,2 @@
+seizure_count,mean_duration_s,min_duration_s,max_duration_s,mean_gap_s,mean_onset_interval_s
+2,27.5,25.0,30.0,99.75,129.75

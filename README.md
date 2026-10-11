@@ -1,67 +1,56 @@
-# Mini-projet Data Mining — détection des crises d'absence en EEG
+# EEG data-mining project
 
-Chaîne complète allant du signal EEG brut à un modèle capable de détecter les périodes
-de crise d'absence.
+The project covers every requirement through **section 19** of the assignment.
 
-## Organisation
+- [Executed notebook](notebooks/main.ipynb): code, explanations, graphs and results.
+- [Report](reports/report.md): methodology, results, discussion and conclusion.
+- [Detailed explanation](explanation.md): step-by-step reasoning, formulas, code and interpretation.
 
-```
-data/raw/        fichiers fournis : <id>d.mat (signal), <id>h.mat (marqueurs),
-                 Crises absences.xlsx (annotations des crises)
-notebooks/       main.ipynb — le rendu : sections, appels aux fonctions, résultats
-src/             le code réutilisable, appelé depuis le notebook
-reports/         rapport et figures exportées
-```
+| Assignment | Where to find it |
+| --- | --- |
+| Questions 1–6 | Loading, exploration, annotations, sample labels and class balance |
+| Questions 7–9 | Windows, temporal features and FFT band powers |
+| Questions 10–11 | Class comparison and feature correlations |
+| Questions 12–14 | Four models, evaluation and temporal detection |
+| Section 15 | False positives, false negatives, true positives and true negatives |
+| Section 16 | Proposed improvements and limitations |
+| Section 18 | Notebook and report |
+| Section 19 | Complete pipeline summary |
 
-| Module | Contenu | Partie du sujet |
-| --- | --- | --- |
-| `src/data.py` | lecture des fichiers MATLAB, marqueurs, annotations, résumés | I et II |
-| `src/preprocessing.py` | filtrage (coupe-bande secteur, passe-bande 0,5–40 Hz), puissances par bande | prétraitement |
-| `src/visualization.py` | signal, montage multi-canaux, spectre, marqueurs | I |
-| `src/labeling.py` | variable cible à partir des annotations | III |
-| `src/windowing.py` | découpage en fenêtres de 2 s | IV |
-| `src/features.py` | caractéristiques temporelles et fréquentielles | V et VI |
-| `src/training.py` | Decision Tree, Random Forest, KNN, SVM | VIII |
-| `src/evaluation.py` | accuracy, précision, rappel, F1, matrice de confusion | IX |
-| `src/detection.py` | reconstruction des intervalles de crise | X |
+The PDF skips section 17.
 
-Les modules des parties III à X sont encore vides : ils seront remplis au fur et à mesure.
-
-## Installation
+## Run
 
 ```bash
-pip install numpy pandas scipy matplotlib openpyxl scikit-learn
-jupyter lab            # puis ouvrir notebooks/main.ipynb
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+jupyter lab notebooks/main.ipynb
 ```
 
-Le notebook retrouve seul la racine du projet, il peut être lancé depuis n'importe
-quel dossier du dépôt.
+Choose **Run All**. The notebook regenerates its figures, CSV tables and report.
 
-## Format des données
+## Data convention
 
-Les fichiers `.mat` contiennent un `timetable` MATLAB enregistré comme objet (MCOS).
-`scipy.io.loadmat` ne sait pas le décoder : les valeurs sont dans la variable cachée
-`__function_workspace__`. `src/data.py` relit cet espace, retrouve la structure par ses
-champs, concatène les blocs d'une seconde et reconstruit un `DataFrame`.
+The recording starts at **0 seconds**. For `210928B_B_0000`, two explicit `ABSENCE`
+markers in the header provide elapsed seizure starts. Excel provides durations
+(`FinCE − DebCE`, in HH:MM:SS). Pair them chronologically and calculate
+`end = start + duration`. The pairing is an assumption; the notebook and report
+explain the timing discrepancy between the two sources.
 
-Sur `230102B_F_0000` : 313 600 lignes, 22 colonnes (temps + 19 canaux EEG + SLI + ECG),
-256 Hz, 1 225 s, aucune valeur manquante.
+The baseline uses one EEG channel, 2-second windows and 50% overlap. After a
+stratified 80/20 split, training windows sharing samples with test windows are
+removed. Training-only validation selects the model. Results describe one recording.
 
-Deux points relevés à l'exploration :
+## Project files
 
-* le signal brut est dominé par le 50 Hz du secteur — le filtrage n'est pas optionnel ;
-* les canaux `ECG`, `Fz` saturent par moments et `SLI` est constant : ils sont écartés.
+| Folder | Purpose |
+| --- | --- |
+| `data/raw/` | Original data, kept in one location |
+| `notebooks/` | Main executed notebook |
+| `src/` | Functions called by the notebook and their supporting loader code |
+| `reports/` | Report, figures and result tables |
+| `outputs/results/` | Sample labels, window features and test predictions |
+| `tests/` | Checks for labels, features, splitting, models and intervals |
 
-## Point ouvert
-
-Les annotations de `Crises absences.xlsx` sont des **heures de la journée** (fractions de
-journée Excel), alors que le signal démarre à `t = 0 s`. L'heure de début d'enregistrement
-n'est pas stockée dans les fichiers `.mat` : il manque une origine commune pour convertir
-les annotations en secondes depuis le début du tracé. À confirmer avec l'encadrant avant
-la Partie III.
-
-## Avancement
-
-- [x] Partie I — exploration, questions 1 et 2
-- [ ] Partie II — exploitation des annotations (questions 3 et 4)
-- [ ] Parties III à XII
+Run checks with `python -m unittest discover -s tests -v`.
