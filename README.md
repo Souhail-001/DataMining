@@ -29,7 +29,9 @@ reports/         rapport et figures exportées
 | `src/exploration.py` | statistiques des crises, comparaison des classes, corrélations | II et VII |
 | `src/training.py` | séparation 80/20, Decision Tree (Gini et entropie), Random Forest, KNN, SVM, Gradient Boosting | VIII |
 | `src/evaluation.py` | accuracy, précision, rappel, F1, matrices de confusion, test par enregistrement | IX |
-| `src/detection.py` | reconstruction des intervalles de crise | X (à faire) |
+| `src/detection.py` | prédictions par enregistrement, reconstruction des intervalles de crise, comparaison aux annotations | X |
+| `src/errors.py` | analyse des erreurs (VP, FP, FN, VN) | XI |
+| `src/improvement.py` | seuil en validation interne, lissage, variantes testées | XII |
 
 ## Installation
 
@@ -128,4 +130,4 @@ environ 0,70 pour KNN, SVM et Random Forest.
 - [x] Partie II : annotations (Q3, Q4)
 - [x] Parties III à VII : classe, fenêtres, caractéristiques, FFT, analyse exploratoire (Q5 à Q11)
 - [x] Parties VIII et IX : modèles et évaluation (Q12)
-- [ ] Question 13 et Parties X à XII : choix de la métrique, détection temporelle, erreurs, améliorations
+- [x] Question 13 et Parties X à XII : choix de la métrique, détection temporelle, erreurs, améliorations
